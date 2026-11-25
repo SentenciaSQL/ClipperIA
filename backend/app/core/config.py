@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "AI Clipping Platform"
-    app_version: str = "0.4.0"
+    app_version: str = "0.7.0"
     environment: str = "development"
     debug: bool = False
 
@@ -67,6 +67,21 @@ class Settings(BaseSettings):
     score_chat_activity: float = 0.15
     score_visual_changes: float = 0.10
     score_narrative_quality: float = 0.10
+
+    # Clip defaults
+    default_clip_duration: float = 30.0
+    default_aspect_ratio: str = "9:16"
+
+    # Platform OAuth (optional; never hardcode secrets)
+    youtube_client_id: str | None = None
+    youtube_client_secret: str | None = None
+    twitch_client_id: str | None = None
+    twitch_client_secret: str | None = None
+    kick_client_id: str | None = None
+    kick_client_secret: str | None = None
+    kick_auth_base: str | None = None
+    kick_token_url: str | None = None
+    kick_api_base: str | None = None
 
     @property
     def database_dir(self) -> Path:
