@@ -29,6 +29,18 @@ class SettingsService:
             "data_root": str(self._app.data_root),
             "max_concurrent_jobs": self._app.max_concurrent_jobs,
             "max_gpu_inference_jobs": self._app.max_gpu_inference_jobs,
+            "whisper_model_size": self._app.whisper_model_size,
+            "ollama_base_url": self._app.ollama_base_url,
+            "ollama_model": self._app.ollama_model,
+            "ai_provider": self._app.ai_provider,
+            "highlight_weights": {
+                "audio_intensity": self._app.score_audio_intensity,
+                "voice_emotion": self._app.score_voice_emotion,
+                "semantic": self._app.score_semantic,
+                "chat_activity": self._app.score_chat_activity,
+                "visual_changes": self._app.score_visual_changes,
+                "narrative_quality": self._app.score_narrative_quality,
+            },
             "persisted": persisted,
         }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -14,6 +15,8 @@ from app.core.logging import configure_logging, get_logger
 from app.core.storage import ensure_storage_layout
 from app.infrastructure.database.session import init_database
 from app.services.system_detection import SystemDetectionService
+from app.workers.handlers import register_handlers
+from app.workers.job_manager import job_manager
 
 settings = get_settings()
 configure_logging(settings)
@@ -24,6 +27,8 @@ logger = get_logger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     ensure_storage_layout(settings)
     init_database()
+    register_handlers(job_manager)
+    job_manager.start(asyncio.get_running_loop())
     system = SystemDetectionService().detect_system()
     logger.info(
         "application_started",
@@ -33,8 +38,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         ffmpeg=system.ffmpeg.available,
         gpu=system.gpu.available,
         gpu_name=system.gpu.name,
+        whisper_model=settings.whisper_model_size,
+        ollama_model=settings.ollama_model,
     )
     yield
+    job_manager.shutdown()
     logger.info("application_shutdown")
 
 
