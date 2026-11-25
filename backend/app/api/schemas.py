@@ -43,6 +43,11 @@ class RuntimeConfigResponse(BaseModel):
     data_root: str
     max_concurrent_jobs: int
     max_gpu_inference_jobs: int
+    whisper_model_size: str | None = None
+    ollama_base_url: str | None = None
+    ollama_model: str | None = None
+    ai_provider: str | None = None
+    highlight_weights: dict[str, Any] | None = None
     persisted: dict[str, Any]
 
 

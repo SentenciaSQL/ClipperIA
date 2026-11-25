@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "AI Clipping Platform"
-    app_version: str = "0.1.0"
+    app_version: str = "0.4.0"
     environment: str = "development"
     debug: bool = False
 
@@ -50,9 +50,23 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = False
 
-    # Resource defaults (Phase 1 detection / future concurrency)
+    # Resource defaults / concurrency
     max_concurrent_jobs: int = 2
     max_gpu_inference_jobs: int = 1
+
+    # AI defaults (local-first)
+    whisper_model_size: str = "base"
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen3:8b"
+    ai_provider: str = "local"
+
+    # Highlight scoring weights (must sum conceptually to 1.0)
+    score_audio_intensity: float = 0.20
+    score_voice_emotion: float = 0.20
+    score_semantic: float = 0.25
+    score_chat_activity: float = 0.15
+    score_visual_changes: float = 0.10
+    score_narrative_quality: float = 0.10
 
     @property
     def database_dir(self) -> Path:
