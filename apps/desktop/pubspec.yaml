@@ -1,0 +1,23 @@
+name: ai_clipping_platform
+description: AI Clipping Platform — Windows desktop client for local AI-powered video clipping.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.5.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.6.2
+  dio: ^5.7.0
+  web_socket_channel: ^3.0.1
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
