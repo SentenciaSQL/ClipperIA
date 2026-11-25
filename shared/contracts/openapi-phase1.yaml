@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info:
+  title: AI Clipping Platform API
+  version: 0.1.0
+  description: Phase 1 local backend contracts (localhost only).
+servers:
+  - url: http://127.0.0.1:8765/api/v1
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Service is healthy
+  /auth/bootstrap:
+    get:
+      summary: Bootstrap local session API token
+      responses:
+        "200":
+          description: Token and endpoint URLs
+  /system/info:
+    get:
+      summary: Host, FFmpeg, and GPU detection
+      security:
+        - ApiToken: []
+      responses:
+        "200":
+          description: System detection payload
+  /system/ffmpeg:
+    get:
+      summary: FFmpeg detection details
+      security:
+        - ApiToken: []
+      responses:
+        "200":
+          description: FFmpeg info
+  /system/gpu:
+    get:
+      summary: GPU detection details
+      security:
+        - ApiToken: []
+      responses:
+        "200":
+          description: GPU info
+  /dashboard/overview:
+    get:
+      summary: Dashboard aggregates
+      security:
+        - ApiToken: []
+      responses:
+        "200":
+          description: Dashboard overview
+  /settings/runtime:
+    get:
+      summary: Runtime configuration
+      security:
+        - ApiToken: []
+      responses:
+        "200":
+          description: Runtime settings
+  /settings:
+    put:
+      summary: Upsert a persisted setting
+      security:
+        - ApiToken: []
+      responses:
+        "200":
+          description: Updated setting
+  /ws:
+    get:
+      summary: WebSocket event channel
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching protocols
+components:
+  securitySchemes:
+    ApiToken:
+      type: apiKey
+      in: header
+      name: X-API-Token

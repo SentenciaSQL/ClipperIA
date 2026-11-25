@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.mypy_cache/
+.ruff_cache/
+*.db
+
+# Flutter / Dart
+apps/desktop/.dart_tool/
+apps/desktop/.flutter-plugins
+apps/desktop/.flutter-plugins-dependencies
+apps/desktop/.packages
+apps/desktop/build/
+apps/desktop/.pub-cache/
+apps/desktop/.pub/
+**/doc/api/
+*.iml
+.idea/
+
+# Local data / models / logs
+models/**
+!models/.gitkeep
+**/AIClippingPlatform/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors
+.vscode/
+*.swp
+
+# Packaging artifacts
+dist/
+installer/
+*.msix
+*.exe
