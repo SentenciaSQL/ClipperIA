@@ -2,9 +2,14 @@
 
 Local-first Windows desktop application for AI-powered video clipping.
 
-Phase 1 delivers the foundation: Flutter desktop shell, FastAPI local backend, SQLite schema, REST + WebSocket communication, and hardware/dependency detection.
+Phases 1–4 are implemented on this branch:
 
-> Do not start Phase 2 until Phase 1 is manually validated and explicitly approved.
+1. Foundation (desktop shell + local API)
+2. Media ingestion & video library
+3. Transcription / VAD / semantic analysis workers
+4. Highlight detection & review UI
+
+> Do not start Phase 5 until Phases 2–4 are manually validated and explicitly approved.
 
 ## Repository layout
 
@@ -51,8 +56,14 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+# CPU torch (dev) OR CUDA torch for NVIDIA hosts:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
 Copy-Item ..\.env.example .env
 alembic upgrade head
+
+# Optional local LLM for semantic analysis
+# Install Ollama, then: ollama pull qwen3:8b
 
 # 5) Desktop dependencies
 cd ..\apps\desktop
@@ -113,19 +124,26 @@ Documents\AIClippingPlatform\
   logs\
 ```
 
-## Phase 1 API surface
+## API surface (Phases 1–4)
 
-| Method | Path | Auth | Purpose |
-|--------|------|------|---------|
-| GET | `/api/v1/health` | No | Liveness |
-| GET | `/api/v1/auth/bootstrap` | No (localhost) | Session API token |
-| GET | `/api/v1/system/info` | `X-API-Token` | Host / FFmpeg / GPU |
-| GET | `/api/v1/dashboard/overview` | `X-API-Token` | Dashboard stats |
-| GET | `/api/v1/settings/runtime` | `X-API-Token` | Runtime config |
-| PUT | `/api/v1/settings` | `X-API-Token` | Persist setting |
-| WS | `/api/v1/ws?token=...` | Query token | Real-time events |
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/v1/health` | Liveness |
+| GET | `/api/v1/auth/bootstrap` | Session API token |
+| GET | `/api/v1/system/info` | Host / FFmpeg / GPU |
+| GET/POST/PATCH/DELETE | `/api/v1/projects` | Project management |
+| GET/POST/DELETE | `/api/v1/media` | Library + import/upload/reprocess |
+| GET | `/api/v1/media/{id}/thumbnail` | Thumbnail image |
+| POST | `/api/v1/media/{id}/transcribe` | Queue Whisper + Silero VAD |
+| GET | `/api/v1/media/{id}/transcript` | Latest transcript |
+| POST | `/api/v1/media/{id}/analyze` | Queue semantic analysis |
+| POST | `/api/v1/media/{id}/highlights/detect` | Queue highlight detection |
+| GET/PATCH | `/api/v1/highlights` | List / review highlights |
+| GET | `/api/v1/jobs` | Job status |
+| GET | `/api/v1/ai/providers` | Provider readiness |
+| WS | `/api/v1/ws?token=...` | Real-time job events |
 
-Contract file: [`shared/contracts/openapi-phase1.yaml`](shared/contracts/openapi-phase1.yaml)
+Contract file: [`shared/contracts/openapi-phase1.yaml`](shared/contracts/openapi-phase1.yaml) (Phase 1 baseline; newer routes documented above)
 
 ## Manual validation (Phase 1)
 

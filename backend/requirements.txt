@@ -1,5 +1,8 @@
-# AI Clipping Platform — Phase 1 backend dependencies
-# Python 3.12+ recommended (verify CUDA package wheels before upgrading)
+# AI Clipping Platform backend dependencies
+# Python 3.12+ recommended.
+# CUDA note: install a CUDA build of torch separately when targeting NVIDIA GPUs.
+# Example (CUDA 12.1): pip install torch --index-url https://download.pytorch.org/whl/cu121
+# Default below assumes CPU torch is installed explicitly for development VMs.
 
 fastapi>=0.115.0,<1.0.0
 uvicorn[standard]>=0.32.0,<1.0.0
@@ -13,3 +16,13 @@ structlog>=24.4.0,<26.0.0
 psutil>=6.1.0,<8.0.0
 httpx>=0.28.0,<1.0.0
 python-multipart>=0.0.12,<1.0.0
+
+# Phase 2/3/4 media + AI
+numpy>=1.26.0,<2.3.0
+soundfile>=0.12.1,<0.15.0
+faster-whisper>=1.1.0,<2.0.0
+# PyAV 13+ breaks faster-whisper decode_audio (metadata_errors kwarg removed)
+av>=12.0.0,<13.0.0
+opencv-python-headless>=4.10.0,<5.0.0
+# torch is installed via the official index (CPU or CUDA). Pin loosely here for documentation.
+torch>=2.4.0
