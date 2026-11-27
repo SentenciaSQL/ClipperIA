@@ -52,7 +52,7 @@ class AppTheme {
         unselectedIconTheme: IconThemeData(color: textSecondary),
         indicatorColor: Color(0x223DDC97),
       ),
-      cardTheme: const CardTheme(
+      cardTheme: const CardThemeData(
         color: surfaceAlt,
         elevation: 0,
         shape: RoundedRectangleBorder(
