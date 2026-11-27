@@ -20,7 +20,15 @@ class DemucsSeparator:
     """
 
     def available(self) -> bool:
-        return shutil.which("demucs") is not None
+        if shutil.which("demucs") is not None:
+            return True
+        # Fallback: module entrypoint inside the active venv
+        try:
+            import importlib.util
+
+            return importlib.util.find_spec("demucs") is not None
+        except Exception:  # noqa: BLE001
+            return False
 
     def separate(
         self,
@@ -37,14 +45,22 @@ class DemucsSeparator:
             raise FileNotFoundError(f"Input missing: {audio_or_video}")
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            "demucs",
-            "-n",
-            model,
-            "-o",
-            str(output_dir),
-            str(audio_or_video),
-        ]
+        demucs_bin = shutil.which("demucs")
+        if demucs_bin:
+            cmd = [demucs_bin, "-n", model, "-o", str(output_dir), str(audio_or_video)]
+        else:
+            import sys
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "demucs",
+                "-n",
+                model,
+                "-o",
+                str(output_dir),
+                str(audio_or_video),
+            ]
         logger.info("demucs_start", source=str(audio_or_video), model=model)
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=1800)
         if proc.returncode != 0:

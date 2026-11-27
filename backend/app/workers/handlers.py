@@ -7,6 +7,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database.models import ProcessingJob
+from app.services.audio_track_service import AudioTrackService
 from app.services.batch_service import BatchService
 from app.services.clip_service import ClipService
 from app.services.export_service import ExportService
@@ -162,5 +163,18 @@ def register_handlers(manager: JobManager) -> None:
     manager.register("render_clip", render_clip)
     manager.register("export_clip", export_clip)
     manager.register("live_highlight_pass", live_highlight_pass)
+    def separate_audio(
+        db: Session,
+        job: ProcessingJob,
+        progress: Callable[[float, str], None],
+    ) -> dict[str, Any]:
+        payload = job.payload_json or {}
+        clip_id = payload.get("clip_id") or job.source_ref
+        if not clip_id:
+            raise ValueError("clip_id required")
+        result = AudioTrackService(db).run_demucs(str(clip_id), progress=progress)
+        return {"result_ref": clip_id, "tracks": result.get("tracks")}
+
     manager.register("batch_process", batch_process)
     manager.register("generate_clip_versions", generate_clip_versions)
+    manager.register("separate_audio", separate_audio)
