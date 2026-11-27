@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/app_config.dart';
@@ -179,11 +180,23 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
     }
   }
 
+  String get _previewUrl =>
+      'http://${AppConfig.host}:${AppConfig.port}/api/v1/clips/$_selectedClipId/file';
+
+  Future<void> _copy(String value, String label) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copied'), duration: const Duration(seconds: 2)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final backend = ref.watch(backendConnectionProvider);
     final clips = ref.watch(clipsProvider);
     final token = ref.watch(apiClientProvider).token;
+    final filePath = _clipDetail?['file_path']?.toString();
 
     return Padding(
       padding: const EdgeInsets.all(28),
@@ -248,24 +261,85 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
                             Expanded(
                               child: ColoredBox(
                                 color: Colors.black,
-                                child: Center(
-                                  child: Text(
-                                    'Preview\n'
-                                    'http://${AppConfig.host}:${AppConfig.port}/api/v1/clips/$_selectedClipId/file',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: AppTheme.textSecondary),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(20),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Text(
+                                        'Preview URL',
+                                        style: TextStyle(
+                                          color: AppTheme.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      SelectableText(
+                                        _previewUrl,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: AppTheme.textSecondary,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        alignment: WrapAlignment.center,
+                                        children: [
+                                          OutlinedButton.icon(
+                                            onPressed: () =>
+                                                _copy(_previewUrl, 'Preview URL'),
+                                            icon: const Icon(Icons.link, size: 16),
+                                            label: const Text('Copy URL'),
+                                          ),
+                                          if (filePath != null && filePath.isNotEmpty)
+                                            OutlinedButton.icon(
+                                              onPressed: () =>
+                                                  _copy(filePath, 'Local file path'),
+                                              icon: const Icon(Icons.folder_open, size: 16),
+                                              label: const Text('Copy file path'),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        token == null
+                                            ? 'Authenticate with the backend to stream this clip.'
+                                            : 'In-app video preview is not wired yet. Open the local file path in Explorer/VLC, or call the URL with header X-API-Token.',
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                              color: AppTheme.textSecondary,
+                                            ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ),
-                            if (_clipDetail?['file_path'] != null)
+                            if (filePath != null && filePath.isNotEmpty)
                               Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: Text(
-                                  'File ready · auth header required for playback clients',
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: AppTheme.textSecondary,
+                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                                child: Row(
+                                  children: [
+                                    const Text(
+                                      'Local file',
+                                      style: TextStyle(color: AppTheme.textSecondary),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: SelectableText(
+                                        filePath,
+                                        style: Theme.of(context).textTheme.bodySmall,
                                       ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Copy file path',
+                                      onPressed: () =>
+                                          _copy(filePath, 'Local file path'),
+                                      icon: const Icon(Icons.copy, size: 16),
+                                    ),
+                                  ],
                                 ),
                               ),
                           ],
@@ -353,8 +427,6 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
                               style: const TextStyle(color: AppTheme.textSecondary),
                             ),
                           ],
-                          if (token != null)
-                            const SizedBox(height: 8),
                         ],
                       ),
                     ),

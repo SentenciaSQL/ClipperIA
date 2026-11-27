@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/backend_connection.dart';
@@ -32,6 +33,14 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
   double _duration = 30;
   String? _message;
   bool _busy = false;
+
+  Future<void> _copy(String value, String label) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copied'), duration: const Duration(seconds: 2)),
+    );
+  }
 
   Future<void> _generate() async {
     final media = await ref.read(mediaListProvider.future);
@@ -70,7 +79,7 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
           .read(apiClientProvider)
           .exportClip(clipId, preset: _preset);
       setState(() => _message = 'Export job ${job['id']} queued.');
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(const Duration(seconds: 3));
       ref.invalidate(exportsProvider);
     } catch (error) {
       setState(() => _message = 'Export failed: $error');
@@ -84,6 +93,11 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
     final backend = ref.watch(backendConnectionProvider);
     final clips = ref.watch(clipsProvider);
     final exports = ref.watch(exportsProvider);
+    final runtime = ref.watch(runtimeSettingsProvider);
+
+    final dataRoot = runtime.asData?.value['data_root']?.toString();
+    final exportsRoot = dataRoot == null ? null : '$dataRoot\\exports';
+    final clipsRoot = dataRoot == null ? null : '$dataRoot\\clips';
 
     return Padding(
       padding: const EdgeInsets.all(28),
@@ -92,12 +106,45 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
         children: [
           const SectionHeader(
             title: 'Export Center',
-            subtitle: 'Generate clips from highlights and export TikTok / Reels / Shorts presets.',
+            subtitle:
+                'Generate clips from highlights and export TikTok / Reels / Shorts presets.',
           ),
           const SizedBox(height: 16),
           if (backend.state != BackendConnectionState.connected)
             const Text('Connect to the backend to manage exports.')
           else ...[
+            if (exportsRoot != null || clipsRoot != null)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceAlt,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Output folders', style: Theme.of(context).textTheme.titleSmall),
+                    const SizedBox(height: 8),
+                    if (clipsRoot != null)
+                      _PathRow(
+                        label: 'Clips',
+                        path: clipsRoot,
+                        onCopy: () => _copy(clipsRoot, 'Clips folder'),
+                      ),
+                    if (exportsRoot != null) ...[
+                      const SizedBox(height: 6),
+                      _PathRow(
+                        label: 'Exports',
+                        path: exportsRoot,
+                        onCopy: () => _copy(exportsRoot, 'Exports folder'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             Wrap(
               spacing: 12,
               runSpacing: 12,
@@ -145,6 +192,7 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
                   onPressed: () {
                     ref.invalidate(clipsProvider);
                     ref.invalidate(exportsProvider);
+                    ref.invalidate(runtimeSettingsProvider);
                   },
                   icon: const Icon(Icons.refresh),
                 ),
@@ -173,6 +221,7 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
                           separatorBuilder: (_, __) => const SizedBox(height: 8),
                           itemBuilder: (context, index) {
                             final clip = items[index];
+                            final path = clip['file_path']?.toString();
                             return Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
@@ -180,29 +229,46 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(color: AppTheme.border),
                               ),
-                              child: Row(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          clip['title']?.toString() ?? 'Clip',
-                                          style: const TextStyle(fontWeight: FontWeight.w600),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              clip['title']?.toString() ?? 'Clip',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            Text(
+                                              '${clip['start_seconds']}s → ${clip['end_seconds']}s · ${clip['aspect_ratio']} · ${clip['status']}',
+                                              style: const TextStyle(
+                                                color: AppTheme.textSecondary,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        Text(
-                                          '${clip['start_seconds']}s → ${clip['end_seconds']}s · ${clip['aspect_ratio']} · ${clip['status']}',
-                                          style: const TextStyle(color: AppTheme.textSecondary),
-                                        ),
-                                      ],
+                                      ),
+                                      FilledButton(
+                                        onPressed: _busy
+                                            ? null
+                                            : () => _export(clip['id'] as String),
+                                        child: const Text('Export'),
+                                      ),
+                                    ],
+                                  ),
+                                  if (path != null && path.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    _PathRow(
+                                      label: 'File',
+                                      path: path,
+                                      onCopy: () => _copy(path, 'Clip path'),
                                     ),
-                                  ),
-                                  FilledButton(
-                                    onPressed: _busy
-                                        ? null
-                                        : () => _export(clip['id'] as String),
-                                    child: const Text('Export'),
-                                  ),
+                                  ],
                                 ],
                               ),
                             );
@@ -227,10 +293,38 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
                                 style: TextStyle(color: AppTheme.textSecondary),
                               ),
                             for (final item in items)
-                              ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text('${item['preset']} · ${item['resolution']}'),
-                                subtitle: Text('${item['status']} · ${item['id']}'),
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surfaceAlt,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppTheme.border),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${item['preset']} · ${item['resolution']}',
+                                      style: const TextStyle(fontWeight: FontWeight.w600),
+                                    ),
+                                    Text(
+                                      '${item['status']} · ${item['id']}',
+                                      style: const TextStyle(color: AppTheme.textSecondary),
+                                    ),
+                                    if (item['file_path'] != null) ...[
+                                      const SizedBox(height: 8),
+                                      _PathRow(
+                                        label: 'Saved to',
+                                        path: item['file_path'].toString(),
+                                        onCopy: () => _copy(
+                                          item['file_path'].toString(),
+                                          'Export path',
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
                           ],
                         );
@@ -245,6 +339,42 @@ class _ExportsPageState extends ConsumerState<ExportsPage> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _PathRow extends StatelessWidget {
+  const _PathRow({
+    required this.label,
+    required this.path,
+    required this.onCopy,
+  });
+
+  final String label;
+  final String path;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(label, style: const TextStyle(color: AppTheme.textSecondary)),
+        ),
+        Expanded(
+          child: SelectableText(
+            path,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        IconButton(
+          tooltip: 'Copy path',
+          onPressed: onCopy,
+          icon: const Icon(Icons.copy, size: 16),
+        ),
+      ],
     );
   }
 }
