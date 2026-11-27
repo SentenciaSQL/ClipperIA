@@ -7,6 +7,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database.models import ProcessingJob
+from app.services.batch_service import BatchService
 from app.services.clip_service import ClipService
 from app.services.export_service import ExportService
 from app.services.highlight_service import HighlightService
@@ -120,6 +121,40 @@ def register_handlers(manager: JobManager) -> None:
             raise ValueError("session_id required")
         return LiveService(db).run_live_highlight_pass(str(session_id), progress=progress)
 
+    def batch_process(
+        db: Session,
+        job: ProcessingJob,
+        progress: Callable[[float, str], None],
+    ) -> dict[str, Any]:
+        payload = job.payload_json or {}
+        media_ids = payload.get("media_asset_ids") or []
+        if not media_ids and job.source_ref:
+            media_ids = [job.source_ref]
+        if not media_ids:
+            raise ValueError("media_asset_ids required")
+        result = BatchService(db).run(
+            [str(m) for m in media_ids],
+            profile_id=payload.get("profile_id"),
+            progress=progress,
+        )
+        return {"result_ref": media_ids[0], "batch": result}
+
+    def generate_clip_versions(
+        db: Session,
+        job: ProcessingJob,
+        progress: Callable[[float, str], None],
+    ) -> dict[str, Any]:
+        payload = job.payload_json or {}
+        clip_id = payload.get("clip_id") or job.source_ref
+        if not clip_id:
+            raise ValueError("clip_id required")
+        versions = ClipService(db).generate_alternative_versions(
+            str(clip_id),
+            aspect_ratios=payload.get("aspect_ratios"),
+            progress=progress,
+        )
+        return {"result_ref": clip_id, "versions": versions}
+
     manager.register("transcribe_media", transcribe)
     manager.register("semantic_analysis", semantic)
     manager.register("detect_highlights", highlights)
@@ -127,3 +162,5 @@ def register_handlers(manager: JobManager) -> None:
     manager.register("render_clip", render_clip)
     manager.register("export_clip", export_clip)
     manager.register("live_highlight_pass", live_highlight_pass)
+    manager.register("batch_process", batch_process)
+    manager.register("generate_clip_versions", generate_clip_versions)

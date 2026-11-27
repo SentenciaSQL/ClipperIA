@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.ai.providers.ollama_provider import OllamaProvider
+from app.ai.providers.registry import ProviderRegistry
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.repositories.media_repository import MediaRepository
@@ -23,16 +23,10 @@ class SemanticAnalysisService:
         self._settings = settings or get_settings()
         self._media = MediaRepository(db)
         self._transcripts = TranscriptRepository(db)
-        self._ollama = OllamaProvider(self._settings)
+        self._providers = ProviderRegistry(self._settings)
 
     def provider_status(self) -> dict[str, Any]:
-        return {
-            "provider": "ollama",
-            "base_url": self._settings.ollama_base_url,
-            "configured_model": self._settings.ollama_model,
-            "available": self._ollama.available(),
-            "models": self._ollama.list_models(),
-        }
+        return self._providers.status()
 
     def enqueue(self, media_asset_id: str) -> dict[str, Any]:
         asset = self._media.get(media_asset_id)
@@ -72,22 +66,28 @@ class SemanticAnalysisService:
         windows = self._build_candidate_windows(segments)
         report(30, "semantic_analysis")
 
-        if self._ollama.available():
-            analysis = self._analyze_with_ollama(windows, transcript.full_text or "")
-            provider = "ollama"
-        else:
+        provider = "local_heuristic"
+        model_name = "keyword-heuristic"
+        try:
+            provider, llm = self._providers.get_llm()
+            analysis = self._analyze_with_llm(llm, windows, transcript.full_text or "")
+            model_name = getattr(llm, "model_name", None) or (
+                self._settings.ollama_model if provider == "local" else self._settings.cloud_llm_model
+            )
+        except Exception as exc:  # noqa: BLE001
             analysis = self._analyze_with_local_heuristic(windows)
             provider = "local_heuristic"
             logger.warning(
-                "ollama_unavailable_using_local_heuristic",
+                "llm_unavailable_using_local_heuristic",
                 media_asset_id=media_asset_id,
+                error=str(exc),
             )
 
         report(90, "persisting_analysis")
         meta = dict(transcript.segments_json or {})
         meta["semantic_analysis"] = {
             "provider": provider,
-            "model": self._settings.ollama_model if provider == "ollama" else "keyword-heuristic",
+            "model": model_name,
             "windows": windows,
             "result": analysis,
         }
@@ -131,8 +131,9 @@ class SemanticAnalysisService:
             "segment_count": len(segments),
         }
 
-    def _analyze_with_ollama(
+    def _analyze_with_llm(
         self,
+        llm: Any,
         windows: list[dict[str, Any]],
         full_text: str,
     ) -> dict[str, Any]:
@@ -146,7 +147,7 @@ class SemanticAnalysisService:
             f"FULL_TEXT:\n{full_text[:4000]}\n\n"
             f"WINDOWS_JSON:\n{json.dumps(windows[:40])}\n"
         )
-        return self._ollama.analyze_segments(prompt)
+        return llm.analyze_segments(prompt)
 
     def _analyze_with_local_heuristic(self, windows: list[dict[str, Any]]) -> dict[str, Any]:
         keywords = {

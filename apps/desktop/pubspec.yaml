@@ -1,7 +1,7 @@
 name: ai_clipping_platform
 description: AI Clipping Platform — Windows desktop client for local AI-powered video clipping.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.9.0+9
 
 environment:
   sdk: ^3.5.4

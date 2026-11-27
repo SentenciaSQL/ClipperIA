@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     analysis,
+    automation,
     clips,
     dashboard,
     health,
@@ -27,4 +28,5 @@ api_router.include_router(jobs.router)
 api_router.include_router(analysis.router)
 api_router.include_router(clips.router)
 api_router.include_router(live.router)
+api_router.include_router(automation.router)
 api_router.include_router(websocket_router)

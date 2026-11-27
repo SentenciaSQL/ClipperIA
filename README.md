@@ -2,7 +2,7 @@
 
 Local-first Windows desktop application for AI-powered video clipping.
 
-Phases 1–7 are implemented across merged and open PRs:
+Phases **1–9** are implemented:
 
 1. Foundation
 2. Media library
@@ -11,8 +11,8 @@ Phases 1–7 are implemented across merged and open PRs:
 5. Automatic clip generation & export presets
 6. Clip editor (captions, reframe, Demucs optional)
 7. Live YouTube/Twitch/Kick + authorized OBS/local capture
-
-> Do not start Phase 8 until Phases 5–7 are manually validated and explicitly approved.
+8. Hybrid AI, batch automation, descriptions/hashtags, profiles
+9. Optimization, model/storage management, Windows packaging
 
 ## Repository layout
 
@@ -21,7 +21,8 @@ apps/desktop/          Flutter Windows/Linux desktop client
 backend/               FastAPI + SQLAlchemy + Alembic
 shared/contracts/      API contracts
 models/                Reserved for local model assets
-scripts/               Launch helpers (PowerShell + bash)
+packaging/windows/     Inno Setup installer script
+scripts/               Launch + Windows build helpers
 docs/                  Architecture and phase notes
 ```
 
@@ -31,9 +32,10 @@ docs/                  Architecture and phase notes
 |-----------|--------|
 | Flutter stable 3.24+ | Enable Windows desktop: `flutter config --enable-windows-desktop` |
 | Visual Studio 2022 | Desktop development with C++ workload |
-| Python 3.12 | Verify before installing CUDA-bound AI packages in later phases |
+| Python 3.12 | Verify before installing CUDA-bound AI packages |
 | FFmpeg | Must be on `PATH` (`ffmpeg -version`) |
-| NVIDIA drivers / CUDA | Optional for Phase 1 detection; required later for NVENC/NVDEC + GPU inference |
+| NVIDIA drivers / CUDA | Optional; required for NVENC/NVDEC + GPU inference |
+| Inno Setup 6 | Optional; only for building the installer |
 | Git | Required |
 
 ### Exact Windows installation commands (PowerShell)
@@ -83,30 +85,25 @@ Open **two** terminals from the repository root.
 .\scripts\run_backend.ps1
 ```
 
-Or manually:
-
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
-```
-
 **Terminal B — desktop client**
 
 ```powershell
 .\scripts\run_desktop.ps1
 ```
 
-Or manually:
-
-```powershell
-cd apps\desktop
-flutter run -d windows
-```
-
 Backend listens only on `http://127.0.0.1:8765`.
 
 API docs (development): `http://127.0.0.1:8765/docs`
+
+## Windows packaging
+
+```powershell
+.\scripts\build_windows.ps1
+.\scripts\package_windows_installer.ps1   # requires Inno Setup 6
+```
+
+Staged app: `dist\windows\AIClippingPlatform\`  
+Installer: `dist\windows\installer\`
 
 ## Environment
 
@@ -127,55 +124,37 @@ Documents\AIClippingPlatform\
   logs\
 ```
 
-## API surface (Phases 1–4)
+## API surface (selected)
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/v1/health` | Liveness |
 | GET | `/api/v1/auth/bootstrap` | Session API token |
 | GET | `/api/v1/system/info` | Host / FFmpeg / GPU |
-| GET/POST/PATCH/DELETE | `/api/v1/projects` | Project management |
-| GET/POST/DELETE | `/api/v1/media` | Library + import/upload/reprocess |
-| GET | `/api/v1/media/{id}/thumbnail` | Thumbnail image |
-| POST | `/api/v1/media/{id}/transcribe` | Queue Whisper + Silero VAD |
-| GET | `/api/v1/media/{id}/transcript` | Latest transcript |
-| POST | `/api/v1/media/{id}/analyze` | Queue semantic analysis |
-| POST | `/api/v1/media/{id}/highlights/detect` | Queue highlight detection |
-| GET/PATCH | `/api/v1/highlights` | List / review highlights |
-| GET | `/api/v1/jobs` | Job status |
+| GET | `/api/v1/system/resources` | RAM/GPU tips + concurrency |
 | GET | `/api/v1/ai/providers` | Provider readiness |
+| GET | `/api/v1/ai/providers/status` | Local/cloud registry status |
+| POST | `/api/v1/ai/providers/mode` | Set `local` / `cloud` / `auto` |
+| GET/POST | `/api/v1/profiles` | Processing profiles |
+| POST | `/api/v1/batch/process` | Batch automation job |
+| POST | `/api/v1/clips/{id}/metadata` | AI description + hashtags |
+| POST | `/api/v1/clips/{id}/versions` | Alternative aspect ratios |
+| GET/POST | `/api/v1/models` | Whisper model management |
+| GET/POST | `/api/v1/storage/*` | Usage + cache cleanup |
 | WS | `/api/v1/ws?token=...` | Real-time job events |
 
-Contract file: [`shared/contracts/openapi-phase1.yaml`](shared/contracts/openapi-phase1.yaml) (Phase 1 baseline; newer routes documented above)
+## Manual validation
 
-## Manual validation (Phase 1)
-
-1. Start the backend; confirm `GET /api/v1/health` returns `"status":"ok"`.
-2. Call `GET /api/v1/auth/bootstrap` and copy `api_token`.
-3. Call `GET /api/v1/system/info` with header `X-API-Token: <token>` and verify FFmpeg detection.
-4. Confirm GPU fields populate when `nvidia-smi` is available; otherwise an explicit unavailable message is returned.
-5. Open the Flutter app; top bar should show **Backend online** and **WS**.
-6. Dashboard counters load (zeros on a fresh database).
-7. Settings page shows runtime paths and detection results.
-8. Navigate all seven sidebar destinations to confirm the application shell.
-
-PowerShell smoke checks:
-
-```powershell
-$health = Invoke-RestMethod http://127.0.0.1:8765/api/v1/health
-$boot = Invoke-RestMethod http://127.0.0.1:8765/api/v1/auth/bootstrap
-$headers = @{ "X-API-Token" = $boot.api_token }
-Invoke-RestMethod http://127.0.0.1:8765/api/v1/system/info -Headers $headers
-Invoke-RestMethod http://127.0.0.1:8765/api/v1/dashboard/overview -Headers $headers
-```
-
-## Known limitations (Phase 1)
-
-- Media import, transcription, highlights, clip generation, live platforms, and packaging are not implemented yet.
-- API token is generated per backend process unless `ACP_API_TOKEN` is set.
-- This development environment may validate Linux desktop builds; production target remains Windows 10/11.
-- GPU/CUDA detection requires NVIDIA drivers (`nvidia-smi`) on the host.
+1. Start backend + desktop; Settings shows AI providers, profiles, storage.
+2. Import a short video → **Batch process** (Library).
+3. Open Clip Editor → **AI description** and **Alt ratios**.
+4. Settings → Ensure Whisper `tiny`, Cleanup cache.
+5. Optional: set `ACP_CLOUD_LLM_API_KEY` and switch provider mode to `cloud` / `auto`.
 
 ## Documentation
 
+- [`docs/architecture.md`](docs/architecture.md)
 - [`docs/phase-1-foundation.md`](docs/phase-1-foundation.md)
+- [`docs/phase-2-4.md`](docs/phase-2-4.md)
+- [`docs/phase-5-7.md`](docs/phase-5-7.md)
+- [`docs/phase-8-9.md`](docs/phase-8-9.md)

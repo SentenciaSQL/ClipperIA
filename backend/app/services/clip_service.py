@@ -220,6 +220,54 @@ class ClipService:
         report(100, "completed")
         return created
 
+    def enqueue_alternative_versions(
+        self,
+        clip_id: str,
+        *,
+        aspect_ratios: list[str] | None = None,
+    ) -> dict[str, Any]:
+        clip = self._clips.get(clip_id)
+        if clip is None:
+            raise LookupError("Clip not found")
+        job = job_manager.enqueue(
+            job_type="generate_clip_versions",
+            project_id=clip.project_id,
+            source_ref=clip_id,
+            payload={
+                "clip_id": clip_id,
+                "aspect_ratios": aspect_ratios or ["9:16", "1:1", "16:9"],
+            },
+        )
+        from app.repositories.job_repository import JobRepository
+
+        return JobRepository.serialize(job)
+
+    def generate_alternative_versions(
+        self,
+        clip_id: str,
+        *,
+        aspect_ratios: list[str] | None = None,
+        progress: Callable[[float, str], None] | None = None,
+    ) -> list[dict[str, Any]]:
+        ratios = aspect_ratios or ["9:16", "1:1", "16:9"]
+        created: list[dict[str, Any]] = []
+        total = max(1, len(ratios))
+
+        def report(value: float, stage: str) -> None:
+            if progress:
+                progress(value, stage)
+
+        for index, ratio in enumerate(ratios):
+            report((index / total) * 100, f"version_{ratio}")
+            version = self.render_clip(
+                clip_id,
+                version_label=f"alt-{ratio.replace(':', 'x')}",
+                settings={"aspect_ratio": ratio, "make_primary": False},
+            )
+            created.append(version)
+        report(100, "completed")
+        return created
+
     def render_clip(
         self,
         clip_id: str,
@@ -236,6 +284,7 @@ class ClipService:
             raise LookupError("Media asset not found")
         source = Path(asset.file_path)
         settings = settings or {}
+        make_primary = bool(settings.get("make_primary", True))
 
         def report(value: float, stage: str) -> None:
             if progress:
@@ -260,21 +309,22 @@ class ClipService:
             )
         )
         report(85, "persisting")
-        if settings.get("start_seconds") is not None:
-            clip.start_seconds = float(settings["start_seconds"])
-        if settings.get("end_seconds") is not None:
-            clip.end_seconds = float(settings["end_seconds"])
-        if settings.get("aspect_ratio") is not None:
-            clip.aspect_ratio = str(settings["aspect_ratio"])
-        clip.file_path = str(out)
-        clip.status = "ready"
-        self._clips.save(clip)
+        if make_primary:
+            if settings.get("start_seconds") is not None:
+                clip.start_seconds = float(settings["start_seconds"])
+            if settings.get("end_seconds") is not None:
+                clip.end_seconds = float(settings["end_seconds"])
+            if settings.get("aspect_ratio") is not None:
+                clip.aspect_ratio = str(settings["aspect_ratio"])
+            clip.file_path = str(out)
+            clip.status = "ready"
+            self._clips.save(clip)
         version = self._clips.add_version(
             clip_id=clip.id,
             version_label=version_label,
             file_path=str(out),
             settings_json=settings,
-            is_primary=True,
+            is_primary=make_primary,
         )
         report(100, "completed")
         return ClipRepository.serialize_version(version)

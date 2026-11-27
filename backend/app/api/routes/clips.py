@@ -47,6 +47,10 @@ class ExportRequest(BaseModel):
     fps: int | None = None
 
 
+class AlternativeVersionsRequest(BaseModel):
+    aspect_ratios: list[str] | None = None
+
+
 class SubtitleGenerateRequest(BaseModel):
     language: str = "en"
     style: dict | None = None
@@ -109,6 +113,21 @@ def render_clip(clip_id: str, body: RenderClipRequest, db: Session = Depends(get
             clip_id,
             version_label=body.version_label,
             settings=body.settings,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/clips/{clip_id}/versions", status_code=status.HTTP_202_ACCEPTED)
+def generate_alternative_versions(
+    clip_id: str,
+    body: AlternativeVersionsRequest = Body(default_factory=AlternativeVersionsRequest),
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        return ClipService(db).enqueue_alternative_versions(
+            clip_id,
+            aspect_ratios=body.aspect_ratios,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

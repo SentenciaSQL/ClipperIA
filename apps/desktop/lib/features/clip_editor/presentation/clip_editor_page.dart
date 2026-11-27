@@ -144,6 +144,41 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
     }
   }
 
+  Future<void> _generateMetadata() async {
+    if (_selectedClipId == null) return;
+    setState(() => _busy = true);
+    try {
+      final meta = await ref
+          .read(apiClientProvider)
+          .generateClipMetadata(_selectedClipId!);
+      final tags = (meta['hashtags'] as List?)?.join(', ') ?? '';
+      setState(
+        () => _message =
+            'Metadata: ${meta['title']} · #$tags · provider=${meta['provider']}',
+      );
+      await _loadClip(_selectedClipId!);
+    } catch (error) {
+      setState(() => _message = 'Metadata failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _altVersions() async {
+    if (_selectedClipId == null) return;
+    setState(() => _busy = true);
+    try {
+      final job = await ref
+          .read(apiClientProvider)
+          .generateAlternativeVersions(_selectedClipId!);
+      setState(() => _message = 'Alt versions queued: ${job['id']}');
+    } catch (error) {
+      setState(() => _message = 'Alt versions failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final backend = ref.watch(backendConnectionProvider);
@@ -296,6 +331,14 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
                               OutlinedButton(
                                 onPressed: _busy ? null : _separateAudio,
                                 child: const Text('Demucs audio'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _busy ? null : _generateMetadata,
+                                child: const Text('AI description'),
+                              ),
+                              OutlinedButton(
+                                onPressed: _busy ? null : _altVersions,
+                                child: const Text('Alt ratios'),
                               ),
                               FilledButton(
                                 onPressed: _busy ? null : _render,

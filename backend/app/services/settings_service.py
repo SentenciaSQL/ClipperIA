@@ -33,6 +33,11 @@ class SettingsService:
             "ollama_base_url": self._app.ollama_base_url,
             "ollama_model": self._app.ollama_model,
             "ai_provider": self._app.ai_provider,
+            "cloud_llm_base_url": self._app.cloud_llm_base_url,
+            "cloud_llm_model": self._app.cloud_llm_model,
+            "cloud_llm_configured": bool(self._app.cloud_llm_api_key),
+            "storage_cache_max_mb": self._app.storage_cache_max_mb,
+            "job_recovery_enabled": self._app.job_recovery_enabled,
             "highlight_weights": {
                 "audio_intensity": self._app.score_audio_intensity,
                 "voice_emotion": self._app.score_voice_emotion,
