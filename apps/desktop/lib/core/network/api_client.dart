@@ -234,6 +234,187 @@ class ApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> getClipPresets() async {
+    final response = await _dio.get<Map<String, dynamic>>('/clips/presets');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> listClips({String? mediaId}) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/clips',
+      queryParameters: {
+        if (mediaId != null) 'media_asset_id': mediaId,
+      },
+    );
+    return (response.data ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> getClip(String clipId) async {
+    final response = await _dio.get<Map<String, dynamic>>('/clips/$clipId');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> updateClip(
+    String clipId,
+    Map<String, dynamic> body,
+  ) async {
+    final response =
+        await _dio.patch<Map<String, dynamic>>('/clips/$clipId', data: body);
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> generateClips({
+    required String mediaId,
+    String aspectRatio = '9:16',
+    double maxDuration = 30,
+    int limit = 5,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/generate',
+      data: {
+        'media_asset_id': mediaId,
+        'aspect_ratio': aspectRatio,
+        'max_duration': maxDuration,
+        'limit': limit,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> renderClip(
+    String clipId, {
+    String versionLabel = 'edited',
+    Map<String, dynamic>? settings,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/render',
+      data: {
+        'version_label': versionLabel,
+        'settings': settings ?? <String, dynamic>{},
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> generateSubtitles(String clipId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/subtitles',
+      data: <String, dynamic>{},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> reframeClip(String clipId) async {
+    final response =
+        await _dio.post<Map<String, dynamic>>('/clips/$clipId/reframe');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> separateAudio(String clipId) async {
+    final response =
+        await _dio.post<Map<String, dynamic>>('/clips/$clipId/separate-audio');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> exportClip(
+    String clipId, {
+    String preset = 'tiktok',
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/export',
+      data: {'preset': preset},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> listExports({String? clipId}) async {
+    final response = await _dio.get<List<dynamic>>(
+      '/exports',
+      queryParameters: {
+        if (clipId != null) 'clip_id': clipId,
+      },
+    );
+    return (response.data ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> getLivePlatforms() async {
+    final response = await _dio.get<Map<String, dynamic>>('/live/platforms');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> listLiveConnections() async {
+    final response = await _dio.get<List<dynamic>>('/live/connections');
+    return (response.data ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> createLiveConnection({
+    required String platform,
+    required String displayName,
+    String? externalAccountId,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/live/connections',
+      data: {
+        'platform': platform,
+        'display_name': displayName,
+        if (externalAccountId != null) 'external_account_id': externalAccountId,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> startLiveOAuth({
+    required String platform,
+    required String redirectUri,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/live/oauth/start',
+      data: {'platform': platform, 'redirect_uri': redirectUri},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> listLiveSessions() async {
+    final response = await _dio.get<List<dynamic>>('/live/sessions');
+    return (response.data ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> startLocalCapture({
+    required String connectionId,
+    required String inputUrl,
+    String? title,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/live/sessions/capture',
+      data: {
+        'connection_id': connectionId,
+        'input_url': inputUrl,
+        if (title != null) 'title': title,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> stopLiveSession(String sessionId) async {
+    final response = await _dio
+        .post<Map<String, dynamic>>('/live/sessions/$sessionId/stop');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> enqueueLiveHighlights(String sessionId) async {
+    final response = await _dio
+        .post<Map<String, dynamic>>('/live/sessions/$sessionId/highlights');
+    return response.data ?? <String, dynamic>{};
+  }
+
   String absoluteUrl(String relativeOrAbsolute) {
     if (relativeOrAbsolute.startsWith('http')) return relativeOrAbsolute;
     return 'http://${AppConfig.host}:${AppConfig.port}$relativeOrAbsolute';

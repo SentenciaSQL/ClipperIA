@@ -2,14 +2,17 @@
 
 Local-first Windows desktop application for AI-powered video clipping.
 
-Phases 1–4 are implemented on this branch:
+Phases 1–7 are implemented across merged and open PRs:
 
-1. Foundation (desktop shell + local API)
-2. Media ingestion & video library
-3. Transcription / VAD / semantic analysis workers
-4. Highlight detection & review UI
+1. Foundation
+2. Media library
+3. Transcription / semantic analysis
+4. Highlight detection
+5. Automatic clip generation & export presets
+6. Clip editor (captions, reframe, Demucs optional)
+7. Live YouTube/Twitch/Kick + authorized OBS/local capture
 
-> Do not start Phase 5 until Phases 2–4 are manually validated and explicitly approved.
+> Do not start Phase 8 until Phases 5–7 are manually validated and explicitly approved.
 
 ## Repository layout
 
