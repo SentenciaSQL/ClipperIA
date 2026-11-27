@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fvp/fvp.dart' as fvp;
 
 import 'core/config/app_config.dart';
 import 'core/services/backend_connection.dart';
@@ -8,6 +9,10 @@ import 'routing/app_router.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Enable desktop video_player backend for clip preview.
+  fvp.registerWith(options: {
+    'platforms': ['windows', 'linux', 'macos'],
+  });
   runApp(const ProviderScope(child: AiClippingApp()));
 }
 

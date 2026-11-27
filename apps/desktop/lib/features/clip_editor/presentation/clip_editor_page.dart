@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/services/backend_connection.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/local_video_preview.dart';
 import '../../../shared/widgets/section_header.dart';
 import '../../exports/presentation/exports_page.dart';
 
@@ -180,8 +181,12 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
     }
   }
 
-  String get _previewUrl =>
-      'http://${AppConfig.host}:${AppConfig.port}/api/v1/clips/$_selectedClipId/file';
+  String _previewUrl({String? token}) {
+    final base =
+        'http://${AppConfig.host}:${AppConfig.port}/api/v1/clips/$_selectedClipId/file';
+    if (token == null || token.isEmpty) return base;
+    return '$base?token=${Uri.encodeQueryComponent(token)}';
+  }
 
   Future<void> _copy(String value, String label) async {
     await Clipboard.setData(ClipboardData(text: value));
@@ -197,6 +202,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
     final clips = ref.watch(clipsProvider);
     final token = ref.watch(apiClientProvider).token;
     final filePath = _clipDetail?['file_path']?.toString();
+    final browserUrl = _previewUrl(token: token);
 
     return Padding(
       padding: const EdgeInsets.all(28),
@@ -259,89 +265,50 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage> {
                         child: Column(
                           children: [
                             Expanded(
-                              child: ColoredBox(
-                                color: Colors.black,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(20),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const Text(
-                                        'Preview URL',
-                                        style: TextStyle(
-                                          color: AppTheme.textPrimary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 10),
-                                      SelectableText(
-                                        _previewUrl,
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                          color: AppTheme.textSecondary,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        alignment: WrapAlignment.center,
-                                        children: [
-                                          OutlinedButton.icon(
-                                            onPressed: () =>
-                                                _copy(_previewUrl, 'Preview URL'),
-                                            icon: const Icon(Icons.link, size: 16),
-                                            label: const Text('Copy URL'),
-                                          ),
-                                          if (filePath != null && filePath.isNotEmpty)
-                                            OutlinedButton.icon(
-                                              onPressed: () =>
-                                                  _copy(filePath, 'Local file path'),
-                                              icon: const Icon(Icons.folder_open, size: 16),
-                                              label: const Text('Copy file path'),
-                                            ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        token == null
-                                            ? 'Authenticate with the backend to stream this clip.'
-                                            : 'In-app video preview is not wired yet. Open the local file path in Explorer/VLC, or call the URL with header X-API-Token.',
-                                        textAlign: TextAlign.center,
-                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                              color: AppTheme.textSecondary,
-                                            ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              child: LocalVideoPreview(
+                                key: ValueKey(filePath ?? _selectedClipId),
+                                filePath: filePath,
+                                networkUrl: browserUrl,
                               ),
                             ),
-                            if (filePath != null && filePath.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                                child: Row(
-                                  children: [
-                                    const Text(
-                                      'Local file',
-                                      style: TextStyle(color: AppTheme.textSecondary),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: SelectableText(
-                                        filePath,
-                                        style: Theme.of(context).textTheme.bodySmall,
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: SelectableText(
+                                          browserUrl,
+                                          style: Theme.of(context).textTheme.bodySmall,
+                                        ),
                                       ),
+                                      IconButton(
+                                        tooltip: 'Copy browser URL (includes token)',
+                                        onPressed: () =>
+                                            _copy(browserUrl, 'Preview URL'),
+                                        icon: const Icon(Icons.link, size: 16),
+                                      ),
+                                      if (filePath != null && filePath.isNotEmpty)
+                                        IconButton(
+                                          tooltip: 'Copy local file path',
+                                          onPressed: () =>
+                                              _copy(filePath, 'Local file path'),
+                                          icon: const Icon(Icons.folder_open, size: 16),
+                                        ),
+                                    ],
+                                  ),
+                                  if (filePath != null && filePath.isNotEmpty)
+                                    SelectableText(
+                                      filePath,
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            color: AppTheme.textSecondary,
+                                          ),
                                     ),
-                                    IconButton(
-                                      tooltip: 'Copy file path',
-                                      onPressed: () =>
-                                          _copy(filePath, 'Local file path'),
-                                      icon: const Icon(Icons.copy, size: 16),
-                                    ),
-                                  ],
-                                ),
+                                ],
                               ),
+                            ),
                           ],
                         ),
                       ),
