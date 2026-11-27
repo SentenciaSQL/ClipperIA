@@ -71,9 +71,9 @@ class CaptionStylePreview extends StatelessWidget {
 
     final shadows = <Shadow>[];
     if (outline > 0) {
-      final o = outline.clamp(1, 4);
-      for (final dx in [-o, 0.0, o]) {
-        for (final dy in [-o, 0.0, o]) {
+      final o = outline.clamp(1.0, 4.0).toDouble();
+      for (final dx in <double>[-o, 0.0, o]) {
+        for (final dy in <double>[-o, 0.0, o]) {
           if (dx == 0 && dy == 0) continue;
           shadows.add(Shadow(offset: Offset(dx, dy), color: outlineColor));
         }
