@@ -75,20 +75,21 @@ cd ..\apps\desktop
 flutter pub get
 ```
 
-## Run the application (Windows PowerShell)
+## Run the application (Windows)
 
-Open **two** terminals from the repository root.
+From the repository root you can use **one command** (or double-click the `.cmd` files in Explorer).
 
-**Terminal A — backend**
+| Goal | Command / file |
+|------|----------------|
+| Backend only | `.\start-backend.cmd` or `.\scripts\run_backend.ps1` |
+| Desktop only | `.\start-desktop.cmd` or `.\scripts\run_desktop.ps1` |
+| Both (backend in a new window) | `.\start-dev.cmd` |
+
+`run_backend.ps1` creates `.venv` if needed, installs dependencies, copies `.env`, runs `alembic upgrade head`, and starts uvicorn.  
+Faster restarts after the first setup:
 
 ```powershell
-.\scripts\run_backend.ps1
-```
-
-**Terminal B — desktop client**
-
-```powershell
-.\scripts\run_desktop.ps1
+.\scripts\run_backend.ps1 -SkipInstall
 ```
 
 Backend listens only on `http://127.0.0.1:8765`.
