@@ -104,6 +104,8 @@ class EncodeRequest:
     prefer_nvenc: bool = True
     include_source_audio: bool = True
     source_audio_volume: float = 1.0
+    # Timeline offset for original/source audio (ms)
+    source_audio_delay_ms: int = 0
 
 
 class EncodingError(Exception):
@@ -143,6 +145,7 @@ class MediaEncoder:
             or request.opacity < 0.999
             or bool(request.opacity_keyframes)
             or (request.audio_source is not None and request.include_source_audio)
+            or int(getattr(request, "source_audio_delay_ms", 0) or 0) > 0
         )
 
         if use_complex:
@@ -282,7 +285,12 @@ class MediaEncoder:
         ):
             if request.include_source_audio and request.source_audio_volume > 0.001:
                 vol = max(0.0, request.source_audio_volume)
-                filter_parts.append(f"[0:a]volume={vol:.4f}[a0]")
+                delay_ms = int(max(0, getattr(request, "source_audio_delay_ms", 0) or 0))
+                src_chain = []
+                if delay_ms > 0:
+                    src_chain.append(f"adelay={delay_ms}|{delay_ms}")
+                src_chain.append(f"volume={vol:.4f}")
+                filter_parts.append(f"[0:a]{','.join(src_chain)}[a0]")
                 audio_labels.append("[a0]")
 
         for idx, item in enumerate(extra_audio, start=1):
