@@ -28,6 +28,7 @@ class HighlightsPage extends ConsumerStatefulWidget {
 class _HighlightsPageState extends ConsumerState<HighlightsPage> {
   String? _message;
   bool _busy = false;
+  String? _updatingId;
 
   Future<void> _runPipeline(String mediaId) async {
     setState(() {
@@ -71,6 +72,49 @@ class _HighlightsPageState extends ConsumerState<HighlightsPage> {
     throw StateError('Timed out waiting for $jobType');
   }
 
+  Future<void> _setStatus(Map<String, dynamic> item, String status) async {
+    final id = item['id'] as String;
+    setState(() {
+      _updatingId = id;
+      _message = status == 'accepted'
+          ? 'Marking highlight as accepted…'
+          : 'Marking highlight as rejected…';
+    });
+    try {
+      await ref.read(apiClientProvider).updateHighlightStatus(id, status);
+      ref.invalidate(highlightsProvider);
+      if (!mounted) return;
+      setState(() {
+        _message = status == 'accepted'
+            ? 'Highlight accepted. It will be preferred when generating clips.'
+            : 'Highlight rejected.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'accepted' ? 'Highlight accepted' : 'Highlight rejected',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (error) {
+      setState(() => _message = 'Status update failed: $error');
+    } finally {
+      if (mounted) setState(() => _updatingId = null);
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'accepted':
+        return AppTheme.accent;
+      case 'rejected':
+        return AppTheme.danger;
+      default:
+        return AppTheme.warning;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final backend = ref.watch(backendConnectionProvider);
@@ -85,7 +129,8 @@ class _HighlightsPageState extends ConsumerState<HighlightsPage> {
         children: [
           const SectionHeader(
             title: 'AI Highlights',
-            subtitle: 'Ranked moments from audio, speech, semantics, and visual change signals.',
+            subtitle:
+                'Ranked moments from audio, speech, semantics, and visual change signals.',
           ),
           const SizedBox(height: 16),
           if (backend.state != BackendConnectionState.connected)
@@ -101,9 +146,7 @@ class _HighlightsPageState extends ConsumerState<HighlightsPage> {
                       return const Text('Import a video in Video Library first.');
                     }
                     return FilledButton.icon(
-                      onPressed: _busy
-                          ? null
-                          : () => _runPipeline(items.first.id),
+                      onPressed: _busy ? null : () => _runPipeline(items.first.id),
                       icon: const Icon(Icons.auto_awesome),
                       label: Text(
                         _busy
@@ -177,12 +220,22 @@ class _HighlightsPageState extends ConsumerState<HighlightsPage> {
                     itemBuilder: (context, index) {
                       final item = items[index];
                       final reasons = (item['detection_reasons'] as List?) ?? [];
+                      final status = (item['status']?.toString() ?? 'detected').toLowerCase();
+                      final isAccepted = status == 'accepted';
+                      final isRejected = status == 'rejected';
+                      final isUpdating = _updatingId == item['id'];
+                      final borderColor = isAccepted
+                          ? AppTheme.accent.withOpacity(0.7)
+                          : isRejected
+                              ? AppTheme.danger.withOpacity(0.7)
+                              : AppTheme.border;
+
                       return Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: AppTheme.surfaceAlt,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppTheme.border),
+                          border: Border.all(color: borderColor, width: isAccepted || isRejected ? 1.5 : 1),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -194,6 +247,29 @@ class _HighlightsPageState extends ConsumerState<HighlightsPage> {
                                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                         fontWeight: FontWeight.w700,
                                       ),
+                                ),
+                                const SizedBox(width: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _statusColor(status).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: _statusColor(status).withOpacity(0.5),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    status.toUpperCase(),
+                                    style: TextStyle(
+                                      color: _statusColor(status),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
                                 ),
                                 const Spacer(),
                                 Text(
@@ -236,35 +312,47 @@ class _HighlightsPageState extends ConsumerState<HighlightsPage> {
                             const SizedBox(height: 10),
                             Row(
                               children: [
-                                Text(
-                                  'Status: ${item['status']}',
-                                  style: const TextStyle(color: AppTheme.textSecondary),
-                                ),
+                                if (isUpdating)
+                                  const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                else
+                                  Text(
+                                    isAccepted
+                                        ? 'Included for clip generation'
+                                        : isRejected
+                                            ? 'Excluded from clip generation'
+                                            : 'Review this moment',
+                                    style: const TextStyle(color: AppTheme.textSecondary),
+                                  ),
                                 const Spacer(),
-                                TextButton(
-                                  onPressed: () async {
-                                    await ref
-                                        .read(apiClientProvider)
-                                        .updateHighlightStatus(
-                                          item['id'] as String,
-                                          'accepted',
-                                        );
-                                    ref.invalidate(highlightsProvider);
-                                  },
-                                  child: const Text('Accept'),
-                                ),
-                                TextButton(
-                                  onPressed: () async {
-                                    await ref
-                                        .read(apiClientProvider)
-                                        .updateHighlightStatus(
-                                          item['id'] as String,
-                                          'rejected',
-                                        );
-                                    ref.invalidate(highlightsProvider);
-                                  },
-                                  child: const Text('Reject'),
-                                ),
+                                if (!isAccepted)
+                                  FilledButton.tonal(
+                                    onPressed: isUpdating
+                                        ? null
+                                        : () => _setStatus(item, 'accepted'),
+                                    child: const Text('Accept'),
+                                  ),
+                                if (isAccepted)
+                                  FilledButton(
+                                    onPressed: null,
+                                    child: const Text('Accepted'),
+                                  ),
+                                const SizedBox(width: 8),
+                                if (!isRejected)
+                                  OutlinedButton(
+                                    onPressed: isUpdating
+                                        ? null
+                                        : () => _setStatus(item, 'rejected'),
+                                    child: const Text('Reject'),
+                                  ),
+                                if (isRejected)
+                                  OutlinedButton(
+                                    onPressed: null,
+                                    child: const Text('Rejected'),
+                                  ),
                               ],
                             ),
                           ],
