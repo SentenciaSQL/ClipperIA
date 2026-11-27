@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+# deepcopy already imported for preset duplication
+
 from sqlalchemy.orm import Session
 
 from app.ai.transcription.whisper_provider import FasterWhisperProvider
@@ -18,7 +20,20 @@ from app.repositories.audio_track_repository import AudioTrackRepository
 from app.repositories.clip_repository import ClipRepository
 from app.repositories.media_repository import MediaRepository
 from app.repositories.transcript_repository import TranscriptRepository
-from app.services.caption_presets import hex_to_ass_bgr, list_presets, resolve_preset
+from app.services.caption_presets import (
+    CUSTOM_PRESETS_KEY,
+    PLAY_RES_X,
+    PLAY_RES_Y,
+    apply_back_opacity,
+    apply_text_opacity,
+    hex_to_ass_bgr,
+    list_presets,
+    list_system_presets,
+    new_custom_preset_id,
+    normalize_style,
+    resolve_preset,
+)
+from app.services.settings_service import SettingsService
 from app.workers.job_manager import job_manager
 
 logger = get_logger(__name__)
@@ -36,6 +51,7 @@ class SubtitleService:
         self._transcripts = TranscriptRepository(db)
         self._tracks = AudioTrackRepository(db)
         self._media = MediaRepository(db)
+        self._app_settings = SettingsService(db)
 
     def list_for_clip(self, clip_id: str) -> list[dict[str, Any]]:
         return [
@@ -43,8 +59,92 @@ class SubtitleService:
             for s in self._clips.list_subtitles(clip_id)
         ]
 
+    def _custom_presets_map(self) -> dict[str, Any]:
+        raw = self._app_settings.get(CUSTOM_PRESETS_KEY)
+        if isinstance(raw, dict):
+            return dict(raw)
+        return {}
+
     def presets(self) -> dict[str, Any]:
-        return list_presets()
+        custom = self._custom_presets_map()
+        return {
+            "system": list_system_presets(),
+            "custom": {
+                k: normalize_style({**v, "system": False, "id": k, "preset": k})
+                for k, v in custom.items()
+            },
+            "all": list_presets(custom),
+            "play_res": {"x": PLAY_RES_X, "y": PLAY_RES_Y},
+        }
+
+    def save_custom_preset(
+        self,
+        *,
+        style: dict[str, Any],
+        name: str | None = None,
+        preset_id: str | None = None,
+    ) -> dict[str, Any]:
+        custom = self._custom_presets_map()
+        label = (name or style.get("label") or "Custom").strip() or "Custom"
+        if preset_id and preset_id in list_system_presets():
+            # Saving edits of a system preset creates a new user preset
+            preset_id = new_custom_preset_id(label)
+        pid = preset_id or new_custom_preset_id(label)
+        normalized = normalize_style(style)
+        normalized["label"] = label
+        normalized["preset"] = pid
+        normalized["system"] = False
+        normalized["id"] = pid
+        # Never persist clip-specific source on reusable presets
+        normalized.pop("source", None)
+        custom[pid] = normalized
+        self._app_settings.upsert(
+            CUSTOM_PRESETS_KEY, custom, "User caption style presets"
+        )
+        return normalized
+
+    def delete_custom_preset(self, preset_id: str) -> None:
+        if preset_id in list_system_presets():
+            raise ValueError("Cannot delete a system preset")
+        custom = self._custom_presets_map()
+        if preset_id not in custom:
+            raise LookupError("Custom preset not found")
+        custom.pop(preset_id)
+        self._app_settings.upsert(
+            CUSTOM_PRESETS_KEY, custom, "User caption style presets"
+        )
+
+    def duplicate_preset(self, preset_id: str, new_name: str | None = None) -> dict[str, Any]:
+        all_presets = list_presets(self._custom_presets_map())
+        if preset_id not in all_presets:
+            raise LookupError("Preset not found")
+        src = deepcopy(all_presets[preset_id])
+        label = new_name or f"{src.get('label', preset_id)} (copy)"
+        return self.save_custom_preset(style=src, name=label)
+
+    def restore_system_preset(self, preset_id: str) -> dict[str, Any]:
+        system = list_system_presets()
+        if preset_id not in system:
+            raise LookupError("Not a system preset")
+        return system[preset_id]
+
+    def apply_style_to_subtitle(
+        self,
+        subtitle_id: str,
+        style: dict[str, Any],
+        *,
+        preset: str | None = None,
+    ) -> dict[str, Any]:
+        row = self._clips.get_subtitle(subtitle_id)
+        if row is None:
+            raise LookupError("Subtitle not found")
+        cues = list(row.content_json or [])
+        source = (row.style_json or {}).get("source")
+        custom = self._custom_presets_map()
+        style_final = resolve_preset(preset or style.get("preset"), style, custom=custom)
+        if source:
+            style_final["source"] = source
+        return self.update_cues(subtitle_id, cues, style=style_final, preset=preset)
 
     def caption_sync_status(self, clip_id: str) -> dict[str, Any]:
         clip = self._clips.get(clip_id)
@@ -182,9 +282,15 @@ class SubtitleService:
         preserved_style = None
         if existing:
             preserved_style = deepcopy(existing[0].style_json)
+        custom = self._custom_presets_map()
         style_final = resolve_preset(
             preset or (preserved_style or {}).get("preset"),
-            style or ({k: v for k, v in (preserved_style or {}).items() if k not in {"source", "preset"}} or None),
+            style
+            or (
+                {k: v for k, v in (preserved_style or {}).items() if k not in {"source", "preset"}}
+                or None
+            ),
+            custom=custom,
         )
         if preset:
             style_final["preset"] = preset
@@ -308,6 +414,7 @@ class SubtitleService:
         style_final = resolve_preset(
             preserved.get("preset"),
             {k: v for k, v in preserved.items() if k not in {"source", "preset"}} or None,
+            custom=self._custom_presets_map(),
         )
         if preserved.get("preset"):
             style_final["preset"] = preserved["preset"]
@@ -361,12 +468,20 @@ class SubtitleService:
         if preset is not None or style is not None:
             base = dict(row.style_json or {})
             source = base.get("source")
-            row.style_json = resolve_preset(preset or base.get("preset"), style)
+            custom = self._custom_presets_map()
+            row.style_json = resolve_preset(
+                preset or base.get("preset"),
+                style,
+                custom=custom,
+            )
             if preset:
                 row.style_json["preset"] = preset
             if source:
                 row.style_json["source"] = source
-        style_final = row.style_json or resolve_preset("classic")
+        style_final = normalize_style(row.style_json or resolve_preset("classic", custom=self._custom_presets_map()))
+        if row.style_json and row.style_json.get("source"):
+            style_final["source"] = row.style_json["source"]
+        row.style_json = style_final
         self._write_sidecars(row.clip_id, normalized, style_final)
         row.file_path = str(self._settings.subtitles_dir / f"{row.clip_id}.ass")
         return ClipRepository.serialize_subtitle(self._clips.save_subtitle(row))
@@ -756,30 +871,81 @@ class SubtitleService:
 
     def _write_ass(self, path: Path, cues: list[dict[str, Any]], style: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        bold = 1 if style.get("bold") else 0
+        style = normalize_style(style)
+        bold = 1 if style.get("bold") or int(style.get("font_weight") or 400) >= 600 else 0
+        italic = 1 if style.get("italic") else 0
         outline = int(style.get("outline", 3))
         shadow = int(style.get("shadow", 0))
         border_style = int(style.get("border_style", 1))
+        if float(style.get("background_opacity") or 0) > 0.05 and border_style == 1:
+            # Prefer opaque box when background opacity is set
+            border_style = 3
+        primary = apply_text_opacity(
+            str(style.get("primary_colour") or "&H00FFFFFF"),
+            float(style.get("text_opacity", 1.0)),
+        )
+        back = apply_back_opacity(
+            str(style.get("back_colour") or "&H64000000"),
+            float(style.get("background_opacity", 0.0)),
+        )
+        spacing = float(style.get("letter_spacing") or 0.0)
+        margin_l = int(style.get("margin_l", 40))
+        margin_r = int(style.get("margin_r", 40))
+        margin_v = int(style.get("margin_v", 80))
+        max_width = int(style.get("max_width") or PLAY_RES_X)
+        # Derive side margins from max_width when centered-ish
+        if max_width < PLAY_RES_X:
+            side = max(0, (PLAY_RES_X - max_width) // 2)
+            margin_l = max(margin_l, side)
+            margin_r = max(margin_r, side)
+        pad = int(style.get("padding") or 0)
+        if pad:
+            margin_l = max(0, margin_l - pad)
+            margin_r = max(0, margin_r - pad)
+
         header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {PLAY_RES_X}
+PlayResY: {PLAY_RES_Y}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.get('font_name','Arial')},{style.get('font_size',48)},{style.get('primary_colour','&H00FFFFFF')},&H000000FF,{style.get('outline_colour','&H00000000')},{style.get('back_colour','&H64000000')},{bold},0,0,0,100,100,0,0,{border_style},{outline},{shadow},{style.get('alignment',2)},40,40,{style.get('margin_v',80)},1
+Style: Default,{style.get('font_name','Arial')},{int(style.get('font_size',48))},{primary},&H000000FF,{style.get('outline_colour','&H00000000')},{back},{bold},{italic},0,0,100,100,{spacing:.2f},0,{border_style},{outline},{shadow},{int(style.get('alignment',2))},{margin_l},{margin_r},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+        pos_x = style.get("pos_x")
+        pos_y = style.get("pos_y")
+        anim_in = str(style.get("animation_in") or "none")
+        anim_out = str(style.get("animation_out") or "none")
+        anim_dur = float(style.get("animation_duration") or 0.25)
         events = []
         for cue in cues:
-            text = self._render_ass_text(str(cue.get("text") or ""), cue.get("overrides") or [], style)
+            text = self._render_ass_text(
+                str(cue.get("text") or ""), cue.get("overrides") or [], style
+            )
+            tags: list[str] = []
+            if pos_x is not None and pos_y is not None:
+                tags.append(f"\\pos({float(pos_x):.1f},{float(pos_y):.1f})")
+            # Simple fade in/out mapped from animation settings
+            cue_dur = max(0.05, float(cue.get("end") or 0) - float(cue.get("start") or 0))
+            fade_in_ms = int(anim_dur * 1000) if anim_in in {"fade", "pop"} else 0
+            fade_out_ms = int(anim_dur * 1000) if anim_out in {"fade", "pop"} else 0
+            if fade_in_ms or fade_out_ms:
+                fade_in_ms = min(fade_in_ms, int(cue_dur * 400))
+                fade_out_ms = min(fade_out_ms, int(cue_dur * 400))
+                tags.append(f"\\fad({fade_in_ms},{fade_out_ms})")
+            if anim_in == "pop":
+                tags.append(r"\t(0,180,\fscx110\fscy110)\t(180,280,\fscx100\fscy100)")
+            prefix = f"{{{''.join(tags)}}}" if tags else ""
             events.append(
                 "Dialogue: 0,"
                 f"{self._format_ass_ts(float(cue['start']))},"
                 f"{self._format_ass_ts(float(cue['end']))},"
-                f"Default,,0,0,0,,{text}"
+                f"Default,,0,0,0,,{prefix}{text}"
             )
         path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 

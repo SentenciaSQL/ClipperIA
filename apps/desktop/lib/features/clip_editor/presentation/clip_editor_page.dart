@@ -9,6 +9,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/local_video_preview.dart';
 import '../../../shared/widgets/section_header.dart';
 import '../../exports/presentation/exports_page.dart';
+import 'caption_overlay.dart';
+import 'caption_style_editor.dart';
 import 'caption_style_preview.dart';
 
 class ClipEditorPage extends ConsumerStatefulWidget {
@@ -38,11 +40,15 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
   String _captionPreset = 'classic';
   int? _selectedCueIndex;
   Map<String, dynamic> _presets = {};
+  Map<String, dynamic> _systemPresets = {};
+  Map<String, dynamic> _customPresets = {};
+  Map<String, dynamic> _captionStyle = {};
   Map<String, dynamic>? _captionSync;
   Map<String, dynamic>? _captionDraft;
   String? _voiceTrackId;
   String _correctionFind = '';
   String _correctionReplace = '';
+  bool _captionSelected = true;
   final Map<String, TextEditingController> _offsetControllers = {};
   late final TabController _tabs;
 
@@ -74,18 +80,38 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
       final editorMap =
           (editor['editor'] as Map?)?.cast<String, dynamic>() ?? {};
       final sync = (editor['caption_sync'] as Map?)?.cast<String, dynamic>();
-      final presets =
+      final presetsPayload =
           (editor['caption_presets'] as Map?)?.cast<String, dynamic>() ?? {};
+      final allPresets = _flattenPresets(presetsPayload);
+      final system =
+          (presetsPayload['system'] as Map?)?.cast<String, dynamic>() ?? {};
+      final custom =
+          (presetsPayload['custom'] as Map?)?.cast<String, dynamic>() ?? {};
       final subs = (editor['subtitles'] as List?) ??
           (detail['subtitles'] as List?) ??
           [];
       final firstSub =
           subs.isNotEmpty ? Map<String, dynamic>.from(subs.first as Map) : null;
+      final styleFromSub =
+          (firstSub?['style'] as Map?)?.cast<String, dynamic>() ?? {};
+      final styleFromEditor =
+          (editorMap['caption_style'] as Map?)?.cast<String, dynamic>() ?? {};
+      final presetName = editorMap['caption_preset']?.toString() ??
+          styleFromSub['preset']?.toString() ??
+          'classic';
       setState(() {
         _clipDetail = detail;
         _editorState = editor;
         _captionSync = sync;
-        _presets = presets;
+        _presets = allPresets;
+        _systemPresets = {
+          for (final e in system.entries)
+            e.key: Map<String, dynamic>.from(e.value as Map),
+        };
+        _customPresets = {
+          for (final e in custom.entries)
+            e.key: Map<String, dynamic>.from(e.value as Map),
+        };
         _tracks = ((editor['audio_tracks'] as List?) ?? [])
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
@@ -95,9 +121,14 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
         _zoom = (editorMap['zoom'] as num?)?.toDouble() ?? 1.0;
         _opacity = (editorMap['opacity'] as num?)?.toDouble() ?? 1.0;
         _masterVolume = (editorMap['master_volume'] as num?)?.toDouble() ?? 1.0;
-        _captionPreset = editorMap['caption_preset']?.toString() ??
-            firstSub?['style']?['preset']?.toString() ??
-            'classic';
+        _captionPreset = presetName;
+        _captionStyle = {
+          ...Map<String, dynamic>.from(
+            (allPresets[presetName] as Map?) ?? const {},
+          ),
+          ...styleFromSub,
+          ...styleFromEditor,
+        };
         _voiceTrackId = editorMap['caption_voice_track_id']?.toString() ??
             sync?['caption_voice_track_id']?.toString();
         _subtitleId = firstSub?['id']?.toString();
@@ -151,6 +182,139 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
     } finally {
       setState(() => _busy = false);
     }
+  }
+
+  Map<String, dynamic> _flattenPresets(Map<String, dynamic> payload) {
+    if (payload.containsKey('all') && payload['all'] is Map) {
+      return {
+        for (final e in (payload['all'] as Map).entries)
+          e.key.toString(): Map<String, dynamic>.from(e.value as Map),
+      };
+    }
+    // Legacy flat map
+    if (!payload.containsKey('system') && !payload.containsKey('custom')) {
+      return {
+        for (final e in payload.entries)
+          if (e.value is Map)
+            e.key: Map<String, dynamic>.from(e.value as Map),
+      };
+    }
+    final out = <String, dynamic>{};
+    for (final bucket in ['system', 'custom']) {
+      final map = payload[bucket];
+      if (map is Map) {
+        for (final e in map.entries) {
+          out[e.key.toString()] = Map<String, dynamic>.from(e.value as Map);
+        }
+      }
+    }
+    return out;
+  }
+
+  Future<void> _persistCaptionStyle([Map<String, dynamic>? style]) async {
+    final next = style ?? _captionStyle;
+    setState(() => _captionStyle = Map<String, dynamic>.from(next));
+    await _persistEditor({
+      'caption_preset': _captionPreset,
+      'caption_style': next,
+    });
+    if (_subtitleId != null) {
+      try {
+        final updated = await ref.read(apiClientProvider).applyCaptionStyle(
+              _subtitleId!,
+              style: next,
+              preset: _captionPreset,
+            );
+        setState(() {
+          _cues = ((updated['content'] as List?) ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          final s = (updated['style'] as Map?)?.cast<String, dynamic>();
+          if (s != null) _captionStyle = {..._captionStyle, ...s};
+        });
+      } catch (error) {
+        setState(() => _message = 'Style apply failed: $error');
+      }
+    }
+  }
+
+  Future<void> _selectPreset(String key) async {
+    final base = Map<String, dynamic>.from(
+      (_presets[key] as Map?) ?? const {},
+    );
+    // Keep text corrections / source; replace visual props from preset
+    final source = _captionStyle['source'];
+    setState(() {
+      _captionPreset = key;
+      _captionStyle = {
+        ...base,
+        if (source != null) 'source': source,
+        'preset': key,
+      };
+    });
+    await _persistCaptionStyle(_captionStyle);
+  }
+
+  Future<void> _saveAsCustomPreset() async {
+    final nameController = TextEditingController(
+      text: '${_captionStyle['label'] ?? _captionPreset} custom',
+    );
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save custom preset'),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(labelText: 'Preset name'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, nameController.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      final saved = await ref.read(apiClientProvider).saveCustomCaptionPreset(
+            style: _captionStyle,
+            name: name,
+          );
+      final id = saved['id']?.toString() ?? saved['preset']?.toString();
+      if (_selectedClipId != null) await _loadClip(_selectedClipId!);
+      if (id != null) {
+        setState(() {
+          _captionPreset = id;
+          _captionStyle = {..._captionStyle, ...saved};
+          _message = 'Custom preset "$name" saved.';
+        });
+      }
+    } catch (error) {
+      setState(() => _message = 'Save preset failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetStyleProperty(String key) async {
+    final base = Map<String, dynamic>.from(
+      (_presets[_captionPreset] as Map?) ??
+          (_systemPresets['classic'] as Map?) ??
+          const {},
+    );
+    if (!base.containsKey(key)) {
+      final next = Map<String, dynamic>.from(_captionStyle)..remove(key);
+      await _persistCaptionStyle(next);
+      return;
+    }
+    await _persistCaptionStyle({..._captionStyle, key: base[key]});
   }
 
   void _syncOffsetControllers() {
@@ -260,8 +424,13 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
             _subtitleId!,
             cues: _cues,
             preset: _captionPreset,
+            style: _captionStyle.isEmpty ? null : _captionStyle,
           );
-      setState(() => _message = 'Captions saved (ASS regenerated).');
+      await _persistEditor({
+        'caption_preset': _captionPreset,
+        'caption_style': _captionStyle,
+      });
+      setState(() => _message = 'Captions + style saved (ASS regenerated).');
     } catch (error) {
       setState(() => _message = 'Caption save failed: $error');
     } finally {
@@ -521,32 +690,70 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
                         child: Column(
                           children: [
                             Expanded(
-                              child: Opacity(
-                                opacity: _opacity.clamp(0.05, 1.0),
-                                child: LocalVideoPreview(
-                                  key: ValueKey('${filePath}_$_opacity'),
-                                  filePath: filePath,
-                                  networkUrl: browserUrl,
-                                ),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  // Background plate (not affected by video opacity)
+                                  const ColoredBox(color: Colors.black),
+                                  // VIDEO LAYER ONLY — captions are a sibling above
+                                  Opacity(
+                                    opacity: _opacity.clamp(0.0, 1.0),
+                                    child: LocalVideoPreview(
+                                      key: ValueKey(filePath ?? browserUrl),
+                                      filePath: filePath,
+                                      networkUrl: browserUrl,
+                                    ),
+                                  ),
+                                  // CAPTIONS LAYER — independent opacity / styles
+                                  if (_cues.isNotEmpty)
+                                    CaptionOverlayLayer(
+                                      text: (_selectedCueIndex != null
+                                              ? _cues[_selectedCueIndex!]
+                                              : _cues.first)['text']
+                                          ?.toString() ??
+                                          '',
+                                      style: _captionStyle.isNotEmpty
+                                          ? _captionStyle
+                                          : {
+                                              'font_name': 'Arial',
+                                              'font_size': 48,
+                                              'primary_colour': '&H00FFFFFF',
+                                              'text_opacity': 1.0,
+                                              'alignment': 2,
+                                              'margin_v': 80,
+                                            },
+                                      selected: _captionSelected,
+                                      onSelect: () => setState(() {
+                                        _captionSelected = true;
+                                        _tabs.index = 2;
+                                      }),
+                                      onStyleChanged: (next) {
+                                        setState(() => _captionStyle = next);
+                                      },
+                                    ),
+                                ],
                               ),
                             ),
-                            // Caption overlay preview (independent of video opacity)
                             if (_cues.isNotEmpty)
-                              Container(
-                                width: double.infinity,
-                                color: Colors.transparent,
-                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                                child: Text(
-                                  _cues.first['text']?.toString() ?? '',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(1.0),
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 18,
-                                    shadows: const [
-                                      Shadow(blurRadius: 4, color: Colors.black),
-                                    ],
-                                  ),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                                child: Row(
+                                  children: [
+                                    const Text(
+                                      'Drag caption on preview to reposition',
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    TextButton(
+                                      onPressed: _busy
+                                          ? null
+                                          : () => _persistCaptionStyle(),
+                                      child: const Text('Save caption position'),
+                                    ),
+                                  ],
                                 ),
                               ),
                             Padding(
@@ -951,27 +1158,12 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
               }.contains(t['kind']),
             )
             .toList();
-    final presetEntries = _presets.isNotEmpty
-        ? _presets.entries.toList()
-        : [
-            for (final key in const [
-              'classic',
-              'modern',
-              'tiktok',
-              'youtube_shorts',
-              'karaoke',
-              'minimal',
-              'bold',
-              'highlight',
-              'neon',
-              'custom',
-            ])
-              MapEntry(key, {'label': key, 'font_name': 'Arial', 'font_size': 48}),
-          ];
-    final selectedStyle = Map<String, dynamic>.from(
-      (_presets[_captionPreset] as Map?) ??
-          {'font_name': 'Arial', 'font_size': 48, 'primary_colour': '&H00FFFFFF'},
-    );
+    final systemEntries = _systemPresets.isNotEmpty
+        ? _systemPresets.entries.toList()
+        : _presets.entries
+            .where((e) => (e.value as Map)['system'] != false)
+            .toList();
+    final customEntries = _customPresets.entries.toList();
 
     return ListView(
       padding: const EdgeInsets.only(top: 12),
@@ -1017,47 +1209,151 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
           },
         ),
         const SizedBox(height: 12),
-        Text('Style presets', style: Theme.of(context).textTheme.titleSmall),
+        Text(
+          'System presets (starting points — fully editable after select)',
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
         const SizedBox(height: 8),
         SizedBox(
-          height: 120,
+          height: 110,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: presetEntries.length,
+            itemCount: systemEntries.length,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (context, index) {
-              final entry = presetEntries[index];
+              final entry = systemEntries[index];
               final style = Map<String, dynamic>.from(entry.value as Map);
               return SizedBox(
-                width: 200,
+                width: 180,
                 child: CaptionStylePreview(
                   style: style,
                   label: style['label']?.toString() ?? entry.key,
                   selected: _captionPreset == entry.key,
-                  onTap: () async {
-                    setState(() => _captionPreset = entry.key);
-                    await _persistEditor({'caption_preset': entry.key});
-                    if (_subtitleId != null) {
-                      await _saveCaptions();
-                    }
-                  },
+                  onTap: () => _selectPreset(entry.key),
                 ),
               );
             },
           ),
         ),
-        const SizedBox(height: 10),
-        CaptionStylePreview(
-          style: selectedStyle,
-          label: 'Live preview · $_captionPreset',
-          height: 130,
-          selected: true,
+        if (customEntries.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Custom presets',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 110,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: customEntries.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final entry = customEntries[index];
+                final style = Map<String, dynamic>.from(entry.value as Map);
+                return SizedBox(
+                  width: 180,
+                  child: CaptionStylePreview(
+                    style: style,
+                    label: style['label']?.toString() ?? entry.key,
+                    selected: _captionPreset == entry.key,
+                    onTap: () => _selectPreset(entry.key),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.tonal(
+              onPressed: _busy ? null : _saveAsCustomPreset,
+              child: const Text('Save as custom preset'),
+            ),
+            OutlinedButton(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      final dup = await ref
+                          .read(apiClientProvider)
+                          .duplicateCaptionPreset(_captionPreset);
+                      if (_selectedClipId != null) {
+                        await _loadClip(_selectedClipId!);
+                      }
+                      setState(
+                        () => _message =
+                            'Duplicated preset → ${dup['label'] ?? dup['id']}',
+                      );
+                    },
+              child: const Text('Duplicate preset'),
+            ),
+            if (_customPresets.containsKey(_captionPreset))
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        await ref
+                            .read(apiClientProvider)
+                            .deleteCustomCaptionPreset(_captionPreset);
+                        await _selectPreset('classic');
+                        if (_selectedClipId != null) {
+                          await _loadClip(_selectedClipId!);
+                        }
+                      },
+                child: const Text('Delete custom'),
+              ),
+            if (_systemPresets.containsKey(_captionPreset))
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        final restored = await ref
+                            .read(apiClientProvider)
+                            .restoreSystemCaptionPreset(_captionPreset);
+                        setState(() {
+                          _captionStyle = {
+                            ..._captionStyle,
+                            ...restored,
+                            'preset': _captionPreset,
+                          };
+                        });
+                        await _persistCaptionStyle(_captionStyle);
+                        setState(
+                          () => _message =
+                              'Restored system defaults for $_captionPreset',
+                        );
+                      },
+                child: const Text('Restore system defaults'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        CaptionStyleEditor(
+          style: _captionStyle.isNotEmpty
+              ? _captionStyle
+              : {
+                  'font_name': 'Arial',
+                  'font_size': 48,
+                  'primary_colour': '&H00FFFFFF',
+                  'text_opacity': 1.0,
+                },
+          onChanged: (next) {
+            setState(() => _captionStyle = next);
+          },
+          onResetProperty: _resetStyleProperty,
         ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
+            FilledButton(
+              onPressed: _busy ? null : () => _persistCaptionStyle(),
+              child: const Text('Apply style'),
+            ),
             OutlinedButton(
               onPressed: _busy ? null : () => _generateCaptions(),
               child: const Text('Generate / keep edits'),
@@ -1240,7 +1536,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
           style: Theme.of(context).textTheme.titleSmall,
         ),
         const Text(
-          'Captions stay at full opacity — composition uses separate layers.',
+          'Applies only to the video layer. Captions keep their own text/background opacity.',
           style: TextStyle(color: AppTheme.textSecondary),
         ),
         Slider(
@@ -1249,6 +1545,13 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
           max: 1,
           onChanged: (v) => setState(() => _opacity = v),
           onChangeEnd: (v) => _persistEditor({'opacity': v}),
+        ),
+        Text(
+          'Preview uses Opacity on LocalVideoPreview only; captions are a sibling Stack layer. '
+          'Export burns ASS after video opacity on black.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppTheme.textSecondary,
+              ),
         ),
         Wrap(
           spacing: 8,

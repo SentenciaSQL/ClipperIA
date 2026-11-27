@@ -28,6 +28,7 @@ class EditorPatchRequest(BaseModel):
     burn_captions: bool | None = None
     export_captions_sidecar: bool | None = None
     caption_preset: str | None = None
+    caption_style: dict[str, Any] | None = None
     active_subtitle_id: str | None = None
     caption_voice_track_id: str | None = None
     captions_stale: bool | None = None
@@ -222,6 +223,71 @@ def separate_audio_job(clip_id: str, db: Session = Depends(get_db)) -> dict:
 @router.get("/captions/presets")
 def caption_presets(db: Session = Depends(get_db)) -> dict:
     return SubtitleService(db).presets()
+
+
+class CustomPresetRequest(BaseModel):
+    style: dict[str, Any]
+    name: str | None = None
+    preset_id: str | None = None
+
+
+class DuplicatePresetRequest(BaseModel):
+    new_name: str | None = None
+
+
+class ApplyStyleRequest(BaseModel):
+    style: dict[str, Any]
+    preset: str | None = None
+
+
+@router.post("/captions/presets/custom", status_code=status.HTTP_201_CREATED)
+def save_custom_preset(body: CustomPresetRequest, db: Session = Depends(get_db)) -> dict:
+    try:
+        return SubtitleService(db).save_custom_preset(
+            style=body.style, name=body.name, preset_id=body.preset_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/captions/presets/{preset_id}/duplicate", status_code=status.HTTP_201_CREATED)
+def duplicate_preset(
+    preset_id: str, body: DuplicatePresetRequest, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).duplicate_preset(preset_id, body.new_name)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/captions/presets/{preset_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_custom_preset(preset_id: str, db: Session = Depends(get_db)) -> None:
+    try:
+        SubtitleService(db).delete_custom_preset(preset_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/captions/presets/{preset_id}/restore")
+def restore_system_preset(preset_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return SubtitleService(db).restore_system_preset(preset_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/subtitles/{subtitle_id}/style")
+def apply_caption_style(
+    subtitle_id: str, body: ApplyStyleRequest, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).apply_style_to_subtitle(
+            subtitle_id, body.style, preset=body.preset
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/clips/{clip_id}/subtitles/advanced")
