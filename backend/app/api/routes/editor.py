@@ -29,6 +29,9 @@ class EditorPatchRequest(BaseModel):
     export_captions_sidecar: bool | None = None
     caption_preset: str | None = None
     active_subtitle_id: str | None = None
+    caption_voice_track_id: str | None = None
+    captions_stale: bool | None = None
+    caption_source: dict[str, Any] | None = None
 
 
 class AudioTrackCreateRequest(BaseModel):
@@ -37,6 +40,7 @@ class AudioTrackCreateRequest(BaseModel):
     file_path: str | None = None
     volume: float = 1.0
     start_seconds: float = 0.0
+    offset_seconds: float | None = None
 
 
 class AudioTrackUpdateRequest(BaseModel):
@@ -50,6 +54,7 @@ class AudioTrackUpdateRequest(BaseModel):
     fade_in_seconds: float | None = None
     fade_out_seconds: float | None = None
     start_seconds: float | None = None
+    offset_seconds: float | None = None
     trim_start_seconds: float | None = None
     trim_end_seconds: float | None = None
     sync_offset_seconds: float | None = None
@@ -80,6 +85,30 @@ class CaptionGenerateRequest(BaseModel):
     preset: str | None = "classic"
     style: dict[str, Any] | None = None
     replace_existing: bool = False
+    source_track_id: str | None = None
+
+
+class CaptionPreviewRequest(BaseModel):
+    source_track_id: str | None = None
+    language: str | None = None
+
+
+class CaptionApplyRequest(BaseModel):
+    draft_id: str | None = None
+    proposed_cues: list[dict[str, Any]] | None = None
+    source_track_id: str | None = None
+    keep_manual_corrections: bool = True
+    language: str = "en"
+
+
+class CaptionCorrectRequest(BaseModel):
+    cue_index: int
+    new_text: str
+    replace_phrase: str | None = None
+
+
+class CaptionVoiceTrackRequest(BaseModel):
+    track_id: str | None = None
 
 
 @router.get("/clips/{clip_id}/editor")
@@ -114,13 +143,18 @@ def create_audio_track(
 ) -> dict:
     try:
         AudioTrackService(db).ensure_original_track(clip_id)
+        offset = (
+            body.offset_seconds
+            if body.offset_seconds is not None
+            else body.start_seconds
+        )
         return AudioTrackService(db).create_track(
             clip_id,
             name=body.name,
             kind=body.kind,
             file_path=body.file_path,
             volume=body.volume,
-            start_seconds=body.start_seconds,
+            start_seconds=offset,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -201,6 +235,62 @@ def generate_captions_advanced(
             style=body.style,
             preset=body.preset,
             replace_existing=body.replace_existing,
+            source_track_id=body.source_track_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/clips/{clip_id}/captions/sync")
+def caption_sync_status(clip_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return SubtitleService(db).caption_sync_status(clip_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/clips/{clip_id}/captions/voice-track")
+def set_caption_voice_track(
+    clip_id: str, body: CaptionVoiceTrackRequest, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).set_caption_voice_track(clip_id, body.track_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/clips/{clip_id}/captions/regenerate-preview")
+def preview_caption_regenerate(
+    clip_id: str, body: CaptionPreviewRequest, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).preview_regenerate(
+            clip_id,
+            source_track_id=body.source_track_id,
+            language=body.language,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/clips/{clip_id}/captions/regenerate-apply")
+def apply_caption_regenerate(
+    clip_id: str, body: CaptionApplyRequest, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).apply_regenerate(
+            clip_id,
+            draft_id=body.draft_id,
+            proposed_cues=body.proposed_cues,
+            source_track_id=body.source_track_id,
+            keep_manual_corrections=body.keep_manual_corrections,
+            language=body.language,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -218,6 +308,35 @@ def update_captions_advanced(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/subtitles/{subtitle_id}/correct")
+def correct_caption_text(
+    subtitle_id: str, body: CaptionCorrectRequest, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).correct_cue_text(
+            subtitle_id,
+            body.cue_index,
+            body.new_text,
+            replace_phrase=body.replace_phrase,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/subtitles/{subtitle_id}/restore")
+def restore_caption_text(
+    subtitle_id: str, cue_index: int, db: Session = Depends(get_db)
+) -> dict:
+    try:
+        return SubtitleService(db).restore_cue_text(subtitle_id, cue_index)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/subtitles/{subtitle_id}/overrides")

@@ -56,6 +56,8 @@ class AudioTrackRepository:
             "fade_in_seconds": row.fade_in_seconds,
             "fade_out_seconds": row.fade_out_seconds,
             "start_seconds": row.start_seconds,
+            # Alias: timeline offset when the track begins inside the clip
+            "offset_seconds": float(row.start_seconds or 0.0),
             "trim_start_seconds": row.trim_start_seconds,
             "trim_end_seconds": row.trim_end_seconds,
             "sync_offset_seconds": row.sync_offset_seconds,

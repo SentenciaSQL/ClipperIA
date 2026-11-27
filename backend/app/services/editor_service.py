@@ -27,6 +27,9 @@ DEFAULT_EDITOR: dict[str, Any] = {
     "export_captions_sidecar": False,
     "caption_preset": "classic",
     "active_subtitle_id": None,
+    "caption_voice_track_id": None,
+    "captions_stale": False,
+    "caption_source": None,
 }
 
 
@@ -47,12 +50,20 @@ class EditorService:
         if clip.editor_json:
             state.update(clip.editor_json)
         self._audio.ensure_original_track(clip_id)
+        sync = self._subs.caption_sync_status(clip_id)
+        # Reflect live stale detection into editor payload
+        state["captions_stale"] = bool(sync.get("captions_stale"))
+        if sync.get("caption_source"):
+            state["caption_source"] = sync["caption_source"]
+        if sync.get("caption_voice_track_id"):
+            state["caption_voice_track_id"] = sync["caption_voice_track_id"]
         return {
             "clip_id": clip_id,
             "editor": state,
             "audio_tracks": self._audio.list_tracks(clip_id),
             "subtitles": self._subs.list_for_clip(clip_id),
             "caption_presets": self._subs.presets(),
+            "caption_sync": sync,
         }
 
     def update_editor(self, clip_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -123,7 +134,7 @@ class EditorService:
                 elif subs and subs[0].file_path:
                     burn = Path(subs[0].file_path)
 
-        include_source, source_vol, mix = self._audio.build_mix_inputs(
+        include_source, source_vol, source_delay_ms, mix = self._audio.build_mix_inputs(
             clip_id, for_export=True, clip_duration=duration
         )
         # Optional ducking: reduce non-voice tracks when vocals/voiceover present
@@ -166,6 +177,7 @@ class EditorService:
             ),
             include_source_audio=include_source,
             source_audio_volume=source_vol,
+            source_audio_delay_ms=source_delay_ms,
             audio_mix=mix,
             audio_source=Path(settings["audio_path"])
             if settings.get("audio_path") and not mix

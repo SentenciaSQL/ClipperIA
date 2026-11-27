@@ -483,6 +483,57 @@ class ApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> getCaptionSync(String clipId) async {
+    final response =
+        await _dio.get<Map<String, dynamic>>('/clips/$clipId/captions/sync');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> setCaptionVoiceTrack(
+    String clipId, {
+    String? trackId,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/captions/voice-track',
+      data: {'track_id': trackId},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> previewCaptionRegenerate(
+    String clipId, {
+    String? sourceTrackId,
+    String? language,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/captions/regenerate-preview',
+      data: {
+        if (sourceTrackId != null) 'source_track_id': sourceTrackId,
+        if (language != null) 'language': language,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> applyCaptionRegenerate(
+    String clipId, {
+    String? draftId,
+    List<Map<String, dynamic>>? proposedCues,
+    String? sourceTrackId,
+    bool keepManualCorrections = true,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/captions/regenerate-apply',
+      data: {
+        if (draftId != null) 'draft_id': draftId,
+        if (proposedCues != null) 'proposed_cues': proposedCues,
+        if (sourceTrackId != null) 'source_track_id': sourceTrackId,
+        'keep_manual_corrections': keepManualCorrections,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
   Future<Map<String, dynamic>> updateSubtitlesAdvanced(
     String subtitleId, {
     required List<Map<String, dynamic>> cues,
@@ -496,6 +547,34 @@ class ApiClient {
         if (style != null) 'style': style,
         if (preset != null) 'preset': preset,
       },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> correctCaptionText(
+    String subtitleId, {
+    required int cueIndex,
+    required String newText,
+    String? replacePhrase,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/subtitles/$subtitleId/correct',
+      data: {
+        'cue_index': cueIndex,
+        'new_text': newText,
+        if (replacePhrase != null) 'replace_phrase': replacePhrase,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> restoreCaptionText(
+    String subtitleId, {
+    required int cueIndex,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/subtitles/$subtitleId/restore',
+      queryParameters: {'cue_index': cueIndex},
     );
     return response.data ?? <String, dynamic>{};
   }
@@ -516,12 +595,14 @@ class ApiClient {
     String clipId, {
     String preset = 'classic',
     bool replaceExisting = false,
+    String? sourceTrackId,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/clips/$clipId/subtitles/advanced',
       data: {
         'preset': preset,
         'replace_existing': replaceExisting,
+        if (sourceTrackId != null) 'source_track_id': sourceTrackId,
       },
     );
     return response.data ?? <String, dynamic>{};

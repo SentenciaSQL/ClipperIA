@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/local_video_preview.dart';
 import '../../../shared/widgets/section_header.dart';
 import '../../exports/presentation/exports_page.dart';
+import 'caption_style_preview.dart';
 
 class ClipEditorPage extends ConsumerStatefulWidget {
   const ClipEditorPage({super.key});
@@ -36,6 +37,13 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
   String? _subtitleId;
   String _captionPreset = 'classic';
   int? _selectedCueIndex;
+  Map<String, dynamic> _presets = {};
+  Map<String, dynamic>? _captionSync;
+  Map<String, dynamic>? _captionDraft;
+  String? _voiceTrackId;
+  String _correctionFind = '';
+  String _correctionReplace = '';
+  final Map<String, TextEditingController> _offsetControllers = {};
   late final TabController _tabs;
 
   @override
@@ -47,6 +55,9 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
   @override
   void dispose() {
     _tabs.dispose();
+    for (final c in _offsetControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -62,11 +73,19 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
       final editor = await api.getClipEditor(clipId);
       final editorMap =
           (editor['editor'] as Map?)?.cast<String, dynamic>() ?? {};
-      final subs = (detail['subtitles'] as List?) ?? [];
-      final firstSub = subs.isNotEmpty ? Map<String, dynamic>.from(subs.first as Map) : null;
+      final sync = (editor['caption_sync'] as Map?)?.cast<String, dynamic>();
+      final presets =
+          (editor['caption_presets'] as Map?)?.cast<String, dynamic>() ?? {};
+      final subs = (editor['subtitles'] as List?) ??
+          (detail['subtitles'] as List?) ??
+          [];
+      final firstSub =
+          subs.isNotEmpty ? Map<String, dynamic>.from(subs.first as Map) : null;
       setState(() {
         _clipDetail = detail;
         _editorState = editor;
+        _captionSync = sync;
+        _presets = presets;
         _tracks = ((editor['audio_tracks'] as List?) ?? [])
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
@@ -76,13 +95,18 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
         _zoom = (editorMap['zoom'] as num?)?.toDouble() ?? 1.0;
         _opacity = (editorMap['opacity'] as num?)?.toDouble() ?? 1.0;
         _masterVolume = (editorMap['master_volume'] as num?)?.toDouble() ?? 1.0;
-        _captionPreset = editorMap['caption_preset']?.toString() ?? 'classic';
+        _captionPreset = editorMap['caption_preset']?.toString() ??
+            firstSub?['style']?['preset']?.toString() ??
+            'classic';
+        _voiceTrackId = editorMap['caption_voice_track_id']?.toString() ??
+            sync?['caption_voice_track_id']?.toString();
         _subtitleId = firstSub?['id']?.toString();
         _cues = ((firstSub?['content'] as List?) ?? [])
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
         _message = null;
       });
+      _syncOffsetControllers();
     } catch (error) {
       setState(() => _message = 'Load failed: $error');
     } finally {
@@ -129,6 +153,30 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
     }
   }
 
+  void _syncOffsetControllers() {
+    final ids = _tracks.map((t) => t['id']?.toString() ?? '').toSet();
+    for (final id in _offsetControllers.keys.toList()) {
+      if (!ids.contains(id)) {
+        _offsetControllers.remove(id)?.dispose();
+      }
+    }
+    for (final track in _tracks) {
+      final id = track['id']?.toString();
+      if (id == null) continue;
+      final value = ((track['offset_seconds'] as num?) ??
+              (track['start_seconds'] as num?) ??
+              0)
+          .toDouble();
+      final existing = _offsetControllers[id];
+      if (existing == null) {
+        _offsetControllers[id] =
+            TextEditingController(text: value.toStringAsFixed(2));
+      } else if (existing.text != value.toStringAsFixed(2)) {
+        existing.text = value.toStringAsFixed(2);
+      }
+    }
+  }
+
   Future<void> _generateCaptions({bool replace = false}) async {
     if (_selectedClipId == null) return;
     setState(() => _busy = true);
@@ -137,6 +185,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
             _selectedClipId!,
             preset: _captionPreset,
             replaceExisting: replace,
+            sourceTrackId: _voiceTrackId,
           );
       setState(() {
         _subtitleId = subs['id']?.toString();
@@ -149,6 +198,55 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
       await _loadClip(_selectedClipId!);
     } catch (error) {
       setState(() => _message = 'Caption generation failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _previewRegenerate() async {
+    if (_selectedClipId == null) return;
+    setState(() {
+      _busy = true;
+      _message = 'Transcribing selected voice track for caption preview…';
+    });
+    try {
+      final draft = await ref.read(apiClientProvider).previewCaptionRegenerate(
+            _selectedClipId!,
+            sourceTrackId: _voiceTrackId,
+          );
+      setState(() {
+        _captionDraft = draft;
+        _message =
+            'Draft ready: ${(draft['proposed_cues'] as List?)?.length ?? 0} proposed cues. Review before applying.';
+      });
+    } catch (error) {
+      setState(() => _message = 'Caption preview failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _applyRegenerate({bool keepCorrections = true}) async {
+    if (_selectedClipId == null || _captionDraft == null) return;
+    setState(() => _busy = true);
+    try {
+      final result = await ref.read(apiClientProvider).applyCaptionRegenerate(
+            _selectedClipId!,
+            draftId: _captionDraft!['draft_id']?.toString(),
+            keepManualCorrections: keepCorrections,
+          );
+      setState(() {
+        _captionDraft = null;
+        _subtitleId = result['id']?.toString();
+        _cues = ((result['content'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _message =
+            'Captions regenerated (${_cues.length} cues). Styles preserved.';
+      });
+      await _loadClip(_selectedClipId!);
+    } catch (error) {
+      setState(() => _message = 'Apply regenerate failed: $error');
     } finally {
       setState(() => _busy = false);
     }
@@ -171,35 +269,53 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
     }
   }
 
-  Future<void> _applyWordOverride(String phrase, String hexColor) async {
+  Future<void> _applyTextCorrection() async {
     if (_subtitleId == null || _selectedCueIndex == null) return;
-    final cue = _cues[_selectedCueIndex!];
-    final text = cue['text']?.toString() ?? '';
-    final start = text.indexOf(phrase);
-    if (start < 0) {
-      setState(() => _message = 'Phrase "$phrase" not found in selected cue.');
+    final find = _correctionFind.trim();
+    final replace = _correctionReplace.trim();
+    if (find.isEmpty || replace.isEmpty) {
+      setState(() => _message = 'Enter the incorrect word and the correction.');
       return;
     }
     setState(() => _busy = true);
     try {
-      final updated = await ref.read(apiClientProvider).addCaptionWordOverride(
+      final updated = await ref.read(apiClientProvider).correctCaptionText(
             _subtitleId!,
             cueIndex: _selectedCueIndex!,
-            override: {
-              'start_char': start,
-              'end_char': start + phrase.length,
-              'text': phrase,
-              'style': {'color': hexColor, 'bold': true, 'font_size': 56},
-            },
+            newText: replace,
+            replacePhrase: find,
           );
       setState(() {
         _cues = ((updated['content'] as List?) ?? [])
             .map((e) => Map<String, dynamic>.from(e as Map))
             .toList();
-        _message = 'Override applied to "$phrase".';
+        _message = 'Corrected "$find" → "$replace" (style unchanged).';
+        _correctionFind = '';
+        _correctionReplace = '';
       });
     } catch (error) {
-      setState(() => _message = 'Override failed: $error');
+      setState(() => _message = 'Correction failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restoreCueText(int index) async {
+    if (_subtitleId == null) return;
+    setState(() => _busy = true);
+    try {
+      final updated = await ref.read(apiClientProvider).restoreCaptionText(
+            _subtitleId!,
+            cueIndex: index,
+          );
+      setState(() {
+        _cues = ((updated['content'] as List?) ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _message = 'Restored original transcription for cue ${index + 1}.';
+      });
+    } catch (error) {
+      setState(() => _message = 'Restore failed: $error');
     } finally {
       setState(() => _busy = false);
     }
@@ -280,7 +396,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
     }
   }
 
-  Future<void> _importAudio() async {
+  Future<void> _importAudio({String kind = 'music'}) async {
     if (_selectedClipId == null) return;
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
@@ -295,10 +411,14 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
             _selectedClipId!,
             path: path,
             name: result.files.first.name,
-            kind: 'music',
+            kind: kind,
           );
       await _loadClip(_selectedClipId!);
-      setState(() => _message = 'Audio track imported.');
+      setState(() {
+        _message = kind == 'voiceover' || kind == 'narration'
+            ? 'Voice track imported. Captions may be out of date — preview regenerate if needed.'
+            : 'Audio track imported ($kind).';
+      });
     } catch (error) {
       setState(() => _message = 'Audio import failed: $error');
     } finally {
@@ -346,7 +466,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
           const SectionHeader(
             title: 'Clip Editor',
             subtitle:
-                'Multi-track audio, captions with word overrides, and independent video opacity.',
+                'Multi-track audio, caption sync, style previews, text corrections, and independent opacity.',
           ),
           const SizedBox(height: 16),
           if (backend.state != BackendConnectionState.connected)
@@ -580,7 +700,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
             child: Text(
               '${track['kind']} · ${track['name']} · '
               '${track['muted'] == true ? 'muted' : 'vol ${(track['volume'] as num?)?.toStringAsFixed(2)}'} · '
-              '@${(track['start_seconds'] as num?)?.toStringAsFixed(1)}s',
+              'offset ${((track['offset_seconds'] as num?) ?? (track['start_seconds'] as num?) ?? 0).toStringAsFixed(1)}s',
               style: const TextStyle(color: AppTheme.textSecondary),
             ),
           ),
@@ -589,6 +709,7 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
   }
 
   Widget _buildAudioTab() {
+    final staleVoice = _captionSync?['captions_stale'] == true;
     return ListView(
       padding: const EdgeInsets.only(top: 12),
       children: [
@@ -600,13 +721,33 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
           onChanged: (v) => setState(() => _masterVolume = v),
           onChangeEnd: (v) => _persistEditor({'master_volume': v}),
         ),
+        if (staleVoice)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.warning.withOpacity(0.5)),
+            ),
+            child: const Text(
+              'Voice track used for captions may have changed. Open Captions → Preview regenerate.',
+              style: TextStyle(color: AppTheme.warning),
+            ),
+          ),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: [
             OutlinedButton.icon(
-              onPressed: _busy ? null : _importAudio,
+              onPressed: _busy ? null : () => _importAudio(kind: 'music'),
               icon: const Icon(Icons.library_music),
-              label: const Text('Import audio'),
+              label: const Text('Import music'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _importAudio(kind: 'voiceover'),
+              icon: const Icon(Icons.record_voice_over),
+              label: const Text('Import voice-over'),
             ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _separateAudio,
@@ -617,135 +758,317 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
         ),
         const SizedBox(height: 12),
         for (final track in _tracks)
-          Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${track['name']} (${track['kind']})',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    Switch(
-                      value: track['enabled'] != false,
-                      onChanged: (v) =>
-                          _updateTrack(track['id'] as String, {'enabled': v}),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    FilterChip(
-                      label: Text(track['muted'] == true ? 'Muted' : 'Audible'),
-                      selected: track['muted'] == true,
-                      onSelected: (v) =>
-                          _updateTrack(track['id'] as String, {'muted': v}),
-                    ),
-                    const SizedBox(width: 8),
-                    FilterChip(
-                      label: Text(
-                        track['exclude_from_export'] == true
-                            ? 'Exclude export'
-                            : 'In export',
-                      ),
-                      selected: track['exclude_from_export'] == true,
-                      onSelected: (v) => _updateTrack(
-                        track['id'] as String,
-                        {'exclude_from_export': v},
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  'Volume ${(((track['volume'] as num?)?.toDouble() ?? 1) * 100).round()}%',
-                ),
-                Slider(
-                  value: ((track['volume'] as num?)?.toDouble() ?? 1).clamp(0, 2),
-                  min: 0,
-                  max: 2,
-                  onChangeEnd: (v) =>
-                      _updateTrack(track['id'] as String, {'volume': v}),
-                  onChanged: (_) {},
-                ),
-                Text(
-                  'Start on timeline ${(track['start_seconds'] as num?)?.toStringAsFixed(1) ?? '0'}s',
-                ),
-                Slider(
-                  value: ((track['start_seconds'] as num?)?.toDouble() ?? 0)
-                      .clamp(0, 120),
-                  min: 0,
-                  max: 120,
-                  onChangeEnd: (v) =>
-                      _updateTrack(track['id'] as String, {'start_seconds': v}),
-                  onChanged: (_) {},
-                ),
-                if (track['kind'] != 'original')
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () async {
-                        await ref
-                            .read(apiClientProvider)
-                            .deleteAudioTrack(track['id'] as String);
-                        if (_selectedClipId != null) {
-                          await _loadClip(_selectedClipId!);
-                        }
-                      },
-                      child: const Text('Delete'),
-                    ),
+          Builder(
+            builder: (context) {
+              final id = track['id'] as String;
+              final offset = ((track['offset_seconds'] as num?) ??
+                      (track['start_seconds'] as num?) ??
+                      0)
+                  .toDouble();
+              final controller = _offsetControllers[id] ??
+                  TextEditingController(text: offset.toStringAsFixed(2));
+              _offsetControllers[id] = controller;
+              final isVoice = const {
+                'original',
+                'voiceover',
+                'stem_vocals',
+                'narration',
+                'external',
+              }.contains(track['kind']);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _voiceTrackId == id
+                        ? AppTheme.accent
+                        : AppTheme.border,
                   ),
-              ],
-            ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${track['name']} (${track['kind']})',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        if (isVoice)
+                          TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () async {
+                                    setState(() => _voiceTrackId = id);
+                                    await ref
+                                        .read(apiClientProvider)
+                                        .setCaptionVoiceTrack(
+                                          _selectedClipId!,
+                                          trackId: id,
+                                        );
+                                    await _persistEditor(
+                                      {'caption_voice_track_id': id},
+                                    );
+                                    setState(
+                                      () => _message =
+                                          'Caption voice source → ${track['name']}',
+                                    );
+                                  },
+                            child: Text(
+                              _voiceTrackId == id
+                                  ? 'Caption source'
+                                  : 'Use for captions',
+                            ),
+                          ),
+                        Switch(
+                          value: track['enabled'] != false,
+                          onChanged: (v) => _updateTrack(id, {'enabled': v}),
+                        ),
+                      ],
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        FilterChip(
+                          label: Text(
+                            track['muted'] == true ? 'Muted' : 'Audible',
+                          ),
+                          selected: track['muted'] == true,
+                          onSelected: (v) => _updateTrack(id, {'muted': v}),
+                        ),
+                        FilterChip(
+                          label: Text(
+                            track['exclude_from_export'] == true
+                                ? 'Exclude export'
+                                : 'In export',
+                          ),
+                          selected: track['exclude_from_export'] == true,
+                          onSelected: (v) =>
+                              _updateTrack(id, {'exclude_from_export': v}),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      'Volume ${(((track['volume'] as num?)?.toDouble() ?? 1) * 100).round()}%',
+                    ),
+                    Slider(
+                      value: ((track['volume'] as num?)?.toDouble() ?? 1)
+                          .clamp(0, 2),
+                      min: 0,
+                      max: 2,
+                      onChangeEnd: (v) => _updateTrack(id, {'volume': v}),
+                      onChanged: (_) {},
+                    ),
+                    Text(
+                      'Offset ${offset.toStringAsFixed(2)}s  · starts at ${offset.toStringAsFixed(2)}s on the clip timeline',
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Slider(
+                            value: offset.clamp(0, 120),
+                            min: 0,
+                            max: 120,
+                            onChanged: (v) {
+                              controller.text = v.toStringAsFixed(2);
+                              setState(() {
+                                track['start_seconds'] = v;
+                                track['offset_seconds'] = v;
+                              });
+                            },
+                            onChangeEnd: (v) =>
+                                _updateTrack(id, {'offset_seconds': v}),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 72,
+                          child: TextField(
+                            controller: controller,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              labelText: 'sec',
+                            ),
+                            onSubmitted: (raw) {
+                              final v = double.tryParse(raw.replaceAll(',', '.'));
+                              if (v == null || v < 0) return;
+                              _updateTrack(id, {'offset_seconds': v});
+                            },
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            controller.text = '0.00';
+                            _updateTrack(id, {'offset_seconds': 0.0});
+                          },
+                          child: const Text('Reset'),
+                        ),
+                      ],
+                    ),
+                    if (track['kind'] != 'original')
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () async {
+                            await ref
+                                .read(apiClientProvider)
+                                .deleteAudioTrack(id);
+                            if (_selectedClipId != null) {
+                              await _loadClip(_selectedClipId!);
+                            }
+                          },
+                          child: const Text('Delete'),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
           ),
       ],
     );
   }
 
   Widget _buildCaptionsTab() {
+    final stale = _captionSync?['captions_stale'] == true;
+    final voiceTracks = (_captionSync?['voice_tracks'] as List?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ??
+        _tracks
+            .where(
+              (t) => const {
+                'original',
+                'voiceover',
+                'stem_vocals',
+                'narration',
+                'external',
+              }.contains(t['kind']),
+            )
+            .toList();
+    final presetEntries = _presets.isNotEmpty
+        ? _presets.entries.toList()
+        : [
+            for (final key in const [
+              'classic',
+              'modern',
+              'tiktok',
+              'youtube_shorts',
+              'karaoke',
+              'minimal',
+              'bold',
+              'highlight',
+              'neon',
+              'custom',
+            ])
+              MapEntry(key, {'label': key, 'font_name': 'Arial', 'font_size': 48}),
+          ];
+    final selectedStyle = Map<String, dynamic>.from(
+      (_presets[_captionPreset] as Map?) ??
+          {'font_name': 'Arial', 'font_size': 48, 'primary_colour': '&H00FFFFFF'},
+    );
+
     return ListView(
       padding: const EdgeInsets.only(top: 12),
       children: [
+        if (stale)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.warning.withOpacity(0.5)),
+            ),
+            child: const Text(
+              'Transcription may be out of date for the current voice source. '
+              'Preview a new transcription before applying — manual corrections are kept unless you opt out.',
+              style: TextStyle(color: AppTheme.warning),
+            ),
+          ),
         DropdownButtonFormField<String>(
-          value: _captionPreset,
-          decoration: const InputDecoration(labelText: 'Style preset'),
-          items: const [
-            DropdownMenuItem(value: 'classic', child: Text('Classic')),
-            DropdownMenuItem(value: 'modern', child: Text('Modern')),
-            DropdownMenuItem(value: 'tiktok', child: Text('TikTok')),
-            DropdownMenuItem(value: 'youtube_shorts', child: Text('YouTube Shorts')),
-            DropdownMenuItem(value: 'karaoke', child: Text('Karaoke')),
-            DropdownMenuItem(value: 'minimal', child: Text('Minimal')),
-            DropdownMenuItem(value: 'bold', child: Text('Bold')),
-            DropdownMenuItem(value: 'highlight', child: Text('Highlight')),
-            DropdownMenuItem(value: 'neon', child: Text('Neon')),
-            DropdownMenuItem(value: 'custom', child: Text('Custom')),
+          value: voiceTracks.any((t) => t['id'] == _voiceTrackId)
+              ? _voiceTrackId
+              : null,
+          decoration: const InputDecoration(
+            labelText: 'Voice track for captions',
+            helperText: 'Music/sfx never trigger caption regeneration',
+          ),
+          items: [
+            for (final t in voiceTracks)
+              DropdownMenuItem(
+                value: t['id']?.toString(),
+                child: Text('${t['name']} (${t['kind']})'),
+              ),
           ],
-          onChanged: (v) {
-            setState(() => _captionPreset = v ?? 'classic');
-            _persistEditor({'caption_preset': _captionPreset});
+          onChanged: (id) async {
+            setState(() => _voiceTrackId = id);
+            if (_selectedClipId != null) {
+              await ref
+                  .read(apiClientProvider)
+                  .setCaptionVoiceTrack(_selectedClipId!, trackId: id);
+              await _loadClip(_selectedClipId!);
+            }
           },
+        ),
+        const SizedBox(height: 12),
+        Text('Style presets', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 120,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: presetEntries.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, index) {
+              final entry = presetEntries[index];
+              final style = Map<String, dynamic>.from(entry.value as Map);
+              return SizedBox(
+                width: 200,
+                child: CaptionStylePreview(
+                  style: style,
+                  label: style['label']?.toString() ?? entry.key,
+                  selected: _captionPreset == entry.key,
+                  onTap: () async {
+                    setState(() => _captionPreset = entry.key);
+                    await _persistEditor({'caption_preset': entry.key});
+                    if (_subtitleId != null) {
+                      await _saveCaptions();
+                    }
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        CaptionStylePreview(
+          style: selectedStyle,
+          label: 'Live preview · $_captionPreset',
+          height: 130,
+          selected: true,
         ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: [
             OutlinedButton(
               onPressed: _busy ? null : () => _generateCaptions(),
               child: const Text('Generate / keep edits'),
             ),
             OutlinedButton(
+              onPressed: _busy ? null : _previewRegenerate,
+              child: const Text('Preview from voice track'),
+            ),
+            OutlinedButton(
               onPressed: _busy ? null : () => _generateCaptions(replace: true),
-              child: const Text('Regenerate replace'),
+              child: const Text('Replace from media transcript'),
             ),
             FilledButton.tonal(
               onPressed: _busy ? null : _saveCaptions,
@@ -753,6 +1076,60 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
             ),
           ],
         ),
+        if (_captionDraft != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceAlt,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Compare transcription',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Current: ${(_captionDraft!['comparison'] as Map?)?['current_count'] ?? 0} cues · '
+                  'Proposed: ${(_captionDraft!['comparison'] as Map?)?['proposed_count'] ?? 0} cues · '
+                  'Manual corrections in current: ${_captionDraft!['manual_corrections_in_current'] ?? 0}',
+                  style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Proposed sample: ${((_captionDraft!['comparison'] as Map?)?['proposed_sample'] as List?)?.take(3).join(' | ') ?? ''}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    FilledButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _applyRegenerate(keepCorrections: true),
+                      child: const Text('Apply · keep corrections'),
+                    ),
+                    OutlinedButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _applyRegenerate(keepCorrections: false),
+                      child: const Text('Apply · full replace'),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() => _captionDraft = null),
+                      child: const Text('Keep current captions'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         if (_cues.isEmpty)
           const Text(
@@ -768,15 +1145,14 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
                   : AppTheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: _selectedCueIndex == i ? AppTheme.accent : AppTheme.border,
+                color:
+                    _selectedCueIndex == i ? AppTheme.accent : AppTheme.border,
               ),
             ),
             child: ListTile(
               dense: true,
-              title: TextField(
-                controller: TextEditingController(
-                  text: _cues[i]['text']?.toString() ?? '',
-                ),
+              title: TextFormField(
+                initialValue: _cues[i]['text']?.toString() ?? '',
                 maxLines: 2,
                 style: const TextStyle(fontSize: 13),
                 decoration: const InputDecoration(
@@ -789,26 +1165,60 @@ class _ClipEditorPageState extends ConsumerState<ClipEditorPage>
               subtitle: Text(
                 '${(_cues[i]['start'] as num?)?.toStringAsFixed(1)}s → '
                 '${(_cues[i]['end'] as num?)?.toStringAsFixed(1)}s'
-                '${((_cues[i]['overrides'] as List?)?.isNotEmpty ?? false) ? ' · overrides' : ''}',
-                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                '${_cues[i]['manually_corrected'] == true ? ' · corrected' : ''}',
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 11,
+                ),
               ),
+              trailing: _cues[i]['manually_corrected'] == true
+                  ? IconButton(
+                      tooltip: 'Restore original text',
+                      onPressed: _busy ? null : () => _restoreCueText(i),
+                      icon: const Icon(Icons.undo, size: 18),
+                    )
+                  : null,
               onTap: () => setState(() => _selectedCueIndex = i),
             ),
           ),
         if (_selectedCueIndex != null) ...[
           const SizedBox(height: 8),
-          Text('Word override on selected cue', style: Theme.of(context).textTheme.titleSmall),
-          Wrap(
-            spacing: 8,
+          Text(
+            'Text correction (spelling / ASR errors)',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const Text(
+            'Does not change caption style. Timestamps and visuals are preserved.',
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          ),
+          const SizedBox(height: 6),
+          Row(
             children: [
-              OutlinedButton(
-                onPressed: () {
-                  final text = _cues[_selectedCueIndex!]['text']?.toString() ?? '';
-                  final words = text.split(RegExp(r'\s+')).where((w) => w.length > 3);
-                  if (words.isEmpty) return;
-                  _applyWordOverride(words.first.replaceAll(RegExp(r'[^\w]'), ''), '#FFD400');
-                },
-                child: const Text('Highlight first long word (yellow)'),
+              Expanded(
+                child: TextFormField(
+                  initialValue: _correctionFind,
+                  decoration: const InputDecoration(
+                    labelText: 'Incorrect word/phrase',
+                    isDense: true,
+                  ),
+                  onChanged: (v) => _correctionFind = v,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextFormField(
+                  initialValue: _correctionReplace,
+                  decoration: const InputDecoration(
+                    labelText: 'Correction',
+                    isDense: true,
+                  ),
+                  onChanged: (v) => _correctionReplace = v,
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _busy ? null : _applyTextCorrection,
+                child: const Text('Correct'),
               ),
             ],
           ),

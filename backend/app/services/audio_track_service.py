@@ -94,11 +94,16 @@ class AudioTrackService:
         row = self._tracks.get(track_id)
         if row is None:
             raise LookupError("Audio track not found")
+        # offset_seconds is the user-facing alias for timeline start_seconds
+        if "offset_seconds" in patch and "start_seconds" not in patch:
+            patch = {**patch, "start_seconds": float(patch["offset_seconds"])}
         if row.locked and patch.get("locked") is not False:
             # Allow unlock; block destructive edits while locked
             allowed = {"locked", "enabled", "muted", "volume"}
-            if any(k not in allowed for k in patch):
+            if any(k not in allowed for k in patch if k != "offset_seconds"):
                 raise ValueError("Track is locked")
+        prev_muted = row.muted
+        prev_path = row.file_path
         for key in (
             "name",
             "kind",
@@ -122,7 +127,26 @@ class AudioTrackService:
             row.meta_json = patch["meta"]
         if row.volume is not None:
             row.volume = max(0.0, min(2.0, float(row.volume)))
-        return AudioTrackRepository.serialize(self._tracks.save(row))
+        if row.start_seconds is not None:
+            row.start_seconds = max(0.0, float(row.start_seconds))
+        saved = self._tracks.save(row)
+        # Voice-source changes can desync captions; music/sfx do not
+        from app.services.subtitle_service import VOICE_CAPTION_KINDS, SubtitleService
+
+        if saved.kind in VOICE_CAPTION_KINDS:
+            reason = None
+            if prev_path != saved.file_path:
+                reason = "voice_track_file_changed"
+            elif (not prev_muted) and saved.muted:
+                reason = "voice_track_muted"
+            if reason:
+                SubtitleService(self._db, self._settings).mark_stale_if_voice_changed(
+                    saved.clip_id,
+                    reason=reason,
+                    track_id=saved.id,
+                    track_kind=saved.kind,
+                )
+        return AudioTrackRepository.serialize(saved)
 
     def duplicate_track(self, track_id: str) -> dict[str, Any]:
         row = self._tracks.get(track_id)
@@ -170,12 +194,22 @@ class AudioTrackService:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"{uuid4().hex}{src.suffix.lower()}"
         shutil.copy2(src, dest)
-        return self.create_track(
+        created = self.create_track(
             clip_id,
             name=name or src.stem,
             kind=kind,
             file_path=str(dest),
         )
+        from app.services.subtitle_service import VOICE_CAPTION_KINDS, SubtitleService
+
+        if kind in VOICE_CAPTION_KINDS:
+            SubtitleService(self._db, self._settings).mark_stale_if_voice_changed(
+                clip_id,
+                reason="voice_track_imported",
+                track_id=created.get("id"),
+                track_kind=kind,
+            )
+        return created
 
     def enqueue_demucs(self, clip_id: str) -> dict[str, Any]:
         clip = self._clips.get(clip_id)
@@ -261,19 +295,21 @@ class AudioTrackService:
         *,
         for_export: bool = True,
         clip_duration: float | None = None,
-    ) -> tuple[bool, float, list[AudioMixInput]]:
+    ) -> tuple[bool, float, int, list[AudioMixInput]]:
         """
-        Returns (include_source_audio, source_volume, extra_mix_inputs).
+        Returns (include_source_audio, source_volume, source_delay_ms, extra_mix_inputs).
 
         Original track uses source audio from the video input (index 0).
+        Offset (`start_seconds`) delays when that track begins on the clip timeline.
         Other tracks become extra ffmpeg inputs.
         """
         tracks = self._tracks.list_for_clip(clip_id)
         if not tracks:
-            return True, 1.0, []
+            return True, 1.0, 0, []
 
         include_source = False
         source_volume = 0.0
+        source_delay_ms = 0
         extras: list[AudioMixInput] = []
         for track in tracks:
             if not track.enabled or track.muted:
@@ -283,9 +319,13 @@ class AudioTrackService:
             if track.kind == "original":
                 include_source = True
                 source_volume = float(track.volume)
+                source_delay_ms = int(
+                    max(0.0, (track.start_seconds + track.sync_offset_seconds) * 1000)
+                )
                 continue
             if not track.file_path or not Path(track.file_path).is_file():
                 continue
+            # Offset = when the track starts on the clip timeline (independent of trim)
             delay_ms = int(max(0.0, (track.start_seconds + track.sync_offset_seconds) * 1000))
             trim_dur = None
             if track.trim_end_seconds is not None:
@@ -303,4 +343,4 @@ class AudioTrackService:
                     trim_duration_seconds=trim_dur,
                 )
             )
-        return include_source, source_volume, extras
+        return include_source, source_volume, source_delay_ms, extras
