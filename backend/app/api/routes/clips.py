@@ -15,9 +15,7 @@ from app.services.clip_service import ClipService
 from app.services.export_service import ExportService
 from app.services.subtitle_service import SubtitleService
 from app.ai.reframing.face_tracker import FaceTracker
-from app.media.demucs_separator import DemucsSeparator
 from app.repositories.media_repository import MediaRepository
-from app.core.config import get_settings
 
 router = APIRouter(tags=["clips"], dependencies=[Depends(require_api_token)])
 
@@ -189,29 +187,17 @@ def reframe_clip(clip_id: str, db: Session = Depends(get_db)) -> dict:
     return result
 
 
-@router.post("/clips/{clip_id}/separate-audio")
+@router.post("/clips/{clip_id}/separate-audio", status_code=status.HTTP_202_ACCEPTED)
 def separate_audio(clip_id: str, db: Session = Depends(get_db)) -> dict:
-    clip = ClipService(db).get_clip(clip_id)
-    if clip is None:
-        raise HTTPException(status_code=404, detail="Clip not found")
-    asset = MediaRepository(db).get(clip["media_asset_id"])
-    if asset is None:
-        raise HTTPException(status_code=404, detail="Media asset not found")
-    settings = get_settings()
-    separator = DemucsSeparator()
-    if not separator.available():
-        raise HTTPException(
-            status_code=501,
-            detail="Demucs is not installed. Optional: pip install demucs",
-        )
+    """Queue Demucs stem separation (progress via jobs/WebSocket)."""
+    from app.services.audio_track_service import AudioTrackService
+
     try:
-        result = separator.separate(
-            Path(asset.file_path),
-            settings.cache_dir / "demucs" / clip_id,
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return result
+        return AudioTrackService(db).enqueue_demucs(clip_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
 
 
 @router.get("/exports")

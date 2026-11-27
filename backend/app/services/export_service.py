@@ -92,20 +92,27 @@ class ExportService:
         )
 
         report(30, "encoding_export")
-        self._encoder.encode(
-            EncodeRequest(
-                source=source if source == Path(asset.file_path) else Path(asset.file_path),
-                destination=out,
-                start_seconds=float(clip.start_seconds),
-                end_seconds=float(clip.end_seconds),
-                aspect_ratio=str(preset_cfg["aspect_ratio"]),
-                width=width,
-                height=height,
-                fps=int(fps or preset_cfg["fps"]),
-                video_bitrate=str(preset_cfg["video_bitrate"]),
-                audio_bitrate=str(preset_cfg["audio_bitrate"]),
-            )
+        from app.services.editor_service import EditorService
+        from app.services.subtitle_service import SubtitleService
+
+        encode_req = EditorService(self._db).build_encode_request(
+            clip_id,
+            destination=out,
+            preset_size=(width, height),
+            fps=int(fps or preset_cfg["fps"]),
+            video_bitrate=str(preset_cfg["video_bitrate"]),
+            audio_bitrate=str(preset_cfg["audio_bitrate"]),
+            aspect_ratio=str(preset_cfg["aspect_ratio"]),
         )
+        self._encoder.encode(encode_req)
+        # Optional sidecar captions
+        editor = clip.editor_json or {}
+        sidecar = None
+        if editor.get("export_captions_sidecar"):
+            try:
+                sidecar = SubtitleService(self._db).export_sidecar(clip_id, fmt="srt")
+            except Exception:  # noqa: BLE001
+                sidecar = None
         report(90, "persisting")
         row = self._clips.add_export(
             id=export_id,
@@ -120,6 +127,8 @@ class ExportService:
                 "label": preset_cfg["label"],
                 "source_start": start,
                 "source_end": end,
+                "editor": clip.editor_json,
+                "sidecar": sidecar,
             },
         )
         report(100, "completed")

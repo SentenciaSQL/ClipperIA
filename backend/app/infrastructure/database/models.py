@@ -219,6 +219,8 @@ class Clip(Base, TimestampMixin):
     aspect_ratio: Mapped[str] = mapped_column(String(16), default="9:16", nullable=False)
     file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(64), default="draft", nullable=False)
+    # Editor state: opacity, keyframes, mixer, caption style selection, timeline UI
+    editor_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Optional[Project]] = relationship(back_populates="clips")
     media_asset: Mapped[MediaAsset] = relationship(back_populates="clips")
@@ -226,6 +228,38 @@ class Clip(Base, TimestampMixin):
     versions: Mapped[list[ClipVersion]] = relationship(back_populates="clip")
     subtitles: Mapped[list[Subtitle]] = relationship(back_populates="clip")
     exports: Mapped[list[Export]] = relationship(back_populates="clip")
+    audio_tracks: Mapped[list[ClipAudioTrack]] = relationship(back_populates="clip")
+
+
+class ClipAudioTrack(Base, TimestampMixin):
+    """Independent audio track for advanced clip mixing."""
+
+    __tablename__ = "clip_audio_tracks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    clip_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("clips.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(
+        String(64), default="music", nullable=False
+    )  # original|music|voiceover|sfx|stem_vocals|stem_drums|stem_bass|stem_other|external
+    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    muted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    exclude_from_export: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    volume: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)  # 0..2
+    fade_in_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    fade_out_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    start_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)  # on clip timeline
+    trim_start_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    trim_end_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sync_offset_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    meta_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    clip: Mapped[Clip] = relationship(back_populates="audio_tracks")
 
 
 class ClipVersion(Base, TimestampMixin):

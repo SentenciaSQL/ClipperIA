@@ -415,6 +415,118 @@ class ApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> getClipEditor(String clipId) async {
+    final response =
+        await _dio.get<Map<String, dynamic>>('/clips/$clipId/editor');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> patchClipEditor(
+    String clipId,
+    Map<String, dynamic> body,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/clips/$clipId/editor',
+      data: body,
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<List<Map<String, dynamic>>> listAudioTracks(String clipId) async {
+    final response = await _dio.get<List<dynamic>>('/clips/$clipId/audio-tracks');
+    return (response.data ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> updateAudioTrack(
+    String trackId,
+    Map<String, dynamic> body,
+  ) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/audio-tracks/$trackId',
+      data: body,
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> importAudioTrack(
+    String clipId, {
+    required String path,
+    String? name,
+    String kind = 'music',
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/audio-tracks/import',
+      data: {
+        'path': path,
+        if (name != null) 'name': name,
+        'kind': kind,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<void> deleteAudioTrack(String trackId) async {
+    await _dio.delete('/audio-tracks/$trackId');
+  }
+
+  Future<Map<String, dynamic>> duplicateAudioTrack(String trackId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/audio-tracks/$trackId/duplicate',
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> getCaptionPresets() async {
+    final response = await _dio.get<Map<String, dynamic>>('/captions/presets');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> updateSubtitlesAdvanced(
+    String subtitleId, {
+    required List<Map<String, dynamic>> cues,
+    Map<String, dynamic>? style,
+    String? preset,
+  }) async {
+    final response = await _dio.patch<Map<String, dynamic>>(
+      '/subtitles/$subtitleId/advanced',
+      data: {
+        'cues': cues,
+        if (style != null) 'style': style,
+        if (preset != null) 'preset': preset,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> addCaptionWordOverride(
+    String subtitleId, {
+    required int cueIndex,
+    required Map<String, dynamic> override,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/subtitles/$subtitleId/overrides',
+      data: {'cue_index': cueIndex, 'override': override},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> generateSubtitlesAdvanced(
+    String clipId, {
+    String preset = 'classic',
+    bool replaceExisting = false,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/subtitles/advanced',
+      data: {
+        'preset': preset,
+        'replace_existing': replaceExisting,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
   Future<Map<String, dynamic>> exportClip(
     String clipId, {
     String preset = 'tiktok',

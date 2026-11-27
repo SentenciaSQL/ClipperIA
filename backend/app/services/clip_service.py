@@ -67,6 +67,12 @@ class ClipService:
         payload["exports"] = [
             ClipRepository.serialize_export(e) for e in self._clips.list_exports(clip_id=clip_id)
         ]
+        try:
+            from app.services.editor_service import EditorService
+
+            payload["editor_state"] = EditorService(self._db).get_editor(clip_id)
+        except Exception:  # noqa: BLE001
+            payload["editor_state"] = {"editor": clip.editor_json or {}, "audio_tracks": []}
         return payload
 
     def update_clip(
@@ -293,21 +299,37 @@ class ClipService:
         report(10, "encoding")
         version_id = str(uuid4())
         out = self._settings.clips_dir / clip.id / f"{version_id}.mp4"
-        burn = Path(settings["subtitle_path"]) if settings.get("subtitle_path") else None
-        audio = Path(settings["audio_path"]) if settings.get("audio_path") else None
-        self._encoder.encode(
-            EncodeRequest(
-                source=source,
-                destination=out,
-                start_seconds=float(settings.get("start_seconds", clip.start_seconds)),
-                end_seconds=float(settings.get("end_seconds", clip.end_seconds)),
-                aspect_ratio=str(settings.get("aspect_ratio", clip.aspect_ratio)),
-                zoom=float(settings.get("zoom", 1.0)),
-                crop_box=settings.get("crop_box"),
-                burn_subtitles=burn,
-                audio_source=audio if audio and audio.is_file() else None,
+        from app.services.editor_service import EditorService
+
+        # Persist any editor overrides passed from the UI before composing
+        editor_patch = {
+            k: settings[k]
+            for k in (
+                "opacity",
+                "opacity_keyframes",
+                "zoom",
+                "crop_box",
+                "master_volume",
+                "normalize_audio",
+                "burn_captions",
+                "ducking",
             )
+            if k in settings
+        }
+        if editor_patch:
+            EditorService(self._db).update_editor(clip_id, editor_patch)
+        encode_req = EditorService(self._db).build_encode_request(
+            clip_id,
+            destination=out,
+            settings=settings,
         )
+        # Legacy single audio_path still honored when no mix tracks beyond original
+        if settings.get("audio_path") and not encode_req.audio_mix:
+            audio = Path(settings["audio_path"])
+            if audio.is_file():
+                encode_req.audio_source = audio
+                encode_req.include_source_audio = False
+        self._encoder.encode(encode_req)
         report(85, "persisting")
         if make_primary:
             if settings.get("start_seconds") is not None:

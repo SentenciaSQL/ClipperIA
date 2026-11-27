@@ -110,6 +110,7 @@ class ClipRepository:
             "aspect_ratio": row.aspect_ratio,
             "file_path": row.file_path,
             "status": row.status,
+            "editor": row.editor_json,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
