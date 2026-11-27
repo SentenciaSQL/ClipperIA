@@ -37,6 +37,16 @@ class CaptionStylePreview extends StatelessWidget {
     return Color.fromRGBO(rr, gg, bb, opacity);
   }
 
+  static String hexToAss(String hex, {double opacity = 1.0}) {
+    var c = hex.trim().replaceFirst('#', '');
+    if (c.length != 6) return '&H00FFFFFF';
+    final r = c.substring(0, 2);
+    final g = c.substring(2, 4);
+    final b = c.substring(4, 6);
+    final aa = ((1.0 - opacity.clamp(0.0, 1.0)) * 255).round().toRadixString(16).padLeft(2, '0');
+    return '&H${aa.toUpperCase()}$b$g$r'.toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final fontName = style['font_name']?.toString() ?? 'Arial';

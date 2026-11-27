@@ -26,6 +26,7 @@ DEFAULT_EDITOR: dict[str, Any] = {
     "burn_captions": True,
     "export_captions_sidecar": False,
     "caption_preset": "classic",
+    "caption_style": None,
     "active_subtitle_id": None,
     "caption_voice_track_id": None,
     "captions_stale": False,

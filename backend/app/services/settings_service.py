@@ -49,6 +49,10 @@ class SettingsService:
             "persisted": persisted,
         }
 
+    def get(self, key: str) -> Any | None:
+        item = self._repo.get(key)
+        return None if item is None else item.value_json
+
     def upsert(self, key: str, value: Any, description: str | None = None) -> dict[str, Any]:
         item = self._repo.upsert(key=key, value=value, description=description)
         return {

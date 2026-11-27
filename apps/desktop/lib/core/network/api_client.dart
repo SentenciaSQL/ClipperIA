@@ -483,6 +483,59 @@ class ApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> saveCustomCaptionPreset({
+    required Map<String, dynamic> style,
+    String? name,
+    String? presetId,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/captions/presets/custom',
+      data: {
+        'style': style,
+        if (name != null) 'name': name,
+        if (presetId != null) 'preset_id': presetId,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> duplicateCaptionPreset(
+    String presetId, {
+    String? newName,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/captions/presets/$presetId/duplicate',
+      data: {if (newName != null) 'new_name': newName},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<void> deleteCustomCaptionPreset(String presetId) async {
+    await _dio.delete('/captions/presets/$presetId');
+  }
+
+  Future<Map<String, dynamic>> restoreSystemCaptionPreset(String presetId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/captions/presets/$presetId/restore',
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> applyCaptionStyle(
+    String subtitleId, {
+    required Map<String, dynamic> style,
+    String? preset,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/subtitles/$subtitleId/style',
+      data: {
+        'style': style,
+        if (preset != null) 'preset': preset,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
   Future<Map<String, dynamic>> getCaptionSync(String clipId) async {
     final response =
         await _dio.get<Map<String, dynamic>>('/clips/$clipId/captions/sync');
