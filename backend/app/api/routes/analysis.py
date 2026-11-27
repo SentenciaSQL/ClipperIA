@@ -26,10 +26,12 @@ class HighlightStatusRequest(BaseModel):
 
 @router.get("/ai/providers")
 def ai_providers(db: Session = Depends(get_db)) -> dict:
+    llm_status = SemanticAnalysisService(db).provider_status()
     return {
         "transcription": {"provider": "faster-whisper", "default": True},
         "vad": {"provider": "silero-vad", "default": True},
-        "llm": SemanticAnalysisService(db).provider_status(),
+        "llm": llm_status,
+        "registry": llm_status,
     }
 
 

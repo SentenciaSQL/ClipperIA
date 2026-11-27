@@ -27,6 +27,14 @@ logger = get_logger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     ensure_storage_layout(settings)
     init_database()
+    try:
+        from app.services.storage_service import StorageService
+
+        cleanup = StorageService(settings).optimize_if_needed()
+        if cleanup:
+            logger.info("startup_cache_cleanup", **{k: cleanup[k] for k in ("deleted_files", "freed_mb") if k in cleanup})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("startup_cache_cleanup_failed", error=str(exc))
     register_handlers(job_manager)
     job_manager.start(asyncio.get_running_loop())
     system = SystemDetectionService().detect_system()
@@ -40,6 +48,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         gpu_name=system.gpu.name,
         whisper_model=settings.whisper_model_size,
         ollama_model=settings.ollama_model,
+        ai_provider=settings.ai_provider,
     )
     yield
     job_manager.shutdown()

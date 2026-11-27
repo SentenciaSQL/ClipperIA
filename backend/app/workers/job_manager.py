@@ -44,7 +44,10 @@ class JobManager:
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
         self._started = True
-        self.recover_interrupted()
+        if self._settings.job_recovery_enabled:
+            self.recover_interrupted()
+        else:
+            logger.info("job_recovery_disabled")
         self.pump()
         logger.info("job_manager_started")
 

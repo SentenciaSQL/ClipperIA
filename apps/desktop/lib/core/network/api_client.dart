@@ -234,6 +234,103 @@ class ApiClient {
     return response.data ?? <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> getAiProviderStatus() async {
+    final response =
+        await _dio.get<Map<String, dynamic>>('/ai/providers/status');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> setAiProviderMode(String mode) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/ai/providers/mode',
+      data: {'mode': mode},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> generateClipMetadata(
+    String clipId, {
+    String platform = 'tiktok',
+    String? provider,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/metadata',
+      data: {
+        'platform': platform,
+        if (provider != null) 'provider': provider,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> listProfiles() async {
+    final response = await _dio.get<Map<String, dynamic>>('/profiles');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> setActiveProfile(String profileId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/profiles/active',
+      data: {'profile_id': profileId},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> enqueueBatchProcess({
+    required List<String> mediaAssetIds,
+    String? profileId,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/batch/process',
+      data: {
+        'media_asset_ids': mediaAssetIds,
+        if (profileId != null) 'profile_id': profileId,
+      },
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> generateAlternativeVersions(String clipId) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/clips/$clipId/versions',
+      data: <String, dynamic>{},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> getModelsInventory() async {
+    final response = await _dio.get<Map<String, dynamic>>('/models');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> ensureWhisperModel({String modelSize = 'base'}) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/models/whisper/ensure',
+      data: {'model_size': modelSize},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> getStorageUsage() async {
+    final response = await _dio.get<Map<String, dynamic>>('/storage/usage');
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> cleanupStorage({
+    double olderThanHours = 72,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/storage/cleanup',
+      data: {'older_than_hours': olderThanHours},
+    );
+    return response.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> getSystemResources() async {
+    final response = await _dio.get<Map<String, dynamic>>('/system/resources');
+    return response.data ?? <String, dynamic>{};
+  }
+
   Future<Map<String, dynamic>> getClipPresets() async {
     final response = await _dio.get<Map<String, dynamic>>('/clips/presets');
     return response.data ?? <String, dynamic>{};

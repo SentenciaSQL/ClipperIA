@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "AI Clipping Platform"
-    app_version: str = "0.7.0"
+    app_version: str = "0.9.0"
     environment: str = "development"
     debug: bool = False
 
@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     # Storage
     data_root: Path = Field(default_factory=default_data_root)
     database_filename: str = "ai_clipping.db"
+    storage_cache_max_mb: int = 4096
+    storage_auto_cleanup: bool = True
 
     # Logging
     log_level: str = "INFO"
@@ -53,12 +55,18 @@ class Settings(BaseSettings):
     # Resource defaults / concurrency
     max_concurrent_jobs: int = 2
     max_gpu_inference_jobs: int = 1
+    job_recovery_enabled: bool = True
 
     # AI defaults (local-first)
     whisper_model_size: str = "base"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:8b"
-    ai_provider: str = "local"
+    ai_provider: str = "local"  # local | cloud | auto
+
+    # Optional OpenAI-compatible cloud LLM
+    cloud_llm_api_key: str | None = None
+    cloud_llm_base_url: str = "https://api.openai.com/v1"
+    cloud_llm_model: str = "gpt-4o-mini"
 
     # Highlight scoring weights (must sum conceptually to 1.0)
     score_audio_intensity: float = 0.20

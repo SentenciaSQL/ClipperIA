@@ -121,6 +121,31 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
     }
   }
 
+  Future<void> _batchProcessVisible() async {
+    final items = ref.read(mediaListProvider).asData?.value ?? [];
+    if (items.isEmpty) {
+      setState(() => _statusMessage = 'No media to batch process.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _statusMessage = 'Queueing batch for ${items.length} video(s)…';
+    });
+    try {
+      final job = await ref.read(apiClientProvider).enqueueBatchProcess(
+            mediaAssetIds: items.map((e) => e.id).toList(),
+          );
+      setState(
+        () => _statusMessage =
+            'Batch job ${job['id']} queued (${job['status']}).',
+      );
+    } catch (error) {
+      setState(() => _statusMessage = 'Batch queue failed: $error');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
   Future<void> _reprocess(MediaAsset asset) async {
     setState(() {
       _busy = true;
@@ -325,6 +350,11 @@ class _VideoLibraryPageState extends ConsumerState<VideoLibraryPage> {
                   onPressed: _busy ? null : _createProject,
                   icon: const Icon(Icons.create_new_folder_outlined),
                   label: const Text('New project'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _batchProcessVisible,
+                  icon: const Icon(Icons.playlist_play_outlined),
+                  label: const Text('Batch process'),
                 ),
                 IconButton(
                   onPressed: _busy ? null : _refresh,

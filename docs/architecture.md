@@ -1,4 +1,4 @@
-# Architecture notes (Phase 1)
+# Architecture notes
 
 ## Modular monolith
 
@@ -8,7 +8,10 @@ The backend is a single FastAPI process with clear internal boundaries:
 - `services/` — application use cases
 - `repositories/` — persistence access
 - `infrastructure/` — SQLAlchemy, OS integrations
-- `workers/`, `media/`, `ai/`, `integrations/` — reserved for later phases
+- `workers/` — bounded job pool with recovery
+- `media/` — FFmpeg encoding, audio, thumbnails
+- `ai/` — Whisper, VAD, providers (Ollama + cloud), scoring, reframing
+- `integrations/` — YouTube / Twitch / Kick OAuth adapters
 
 ## Local-first security
 
